@@ -336,10 +336,22 @@ where
             return Err(JwsError::InvalidFormat("Invalid JWT format".to_string()).into());
         };
         let original_payload = payload.to_string();
-        let payload = base64::prelude::BASE64_URL_SAFE_NO_PAD
+
+        let decoded_bytes = base64::prelude::BASE64_URL_SAFE_NO_PAD
             .decode(payload)
-            .unwrap();
-        let payload = std::str::from_utf8(&payload).unwrap();
+            .map_err(|e| {
+                JwtError::Payload(PayloadError::InvalidPayload(format!(
+                    "Base64 decode failed: {}",
+                    e
+                )))
+            })?;
+
+        let payload = std::str::from_utf8(&decoded_bytes).map_err(|e| {
+            JwtError::Payload(PayloadError::InvalidPayload(format!(
+                "UTF-8 decode failed: {}",
+                e
+            )))
+        })?;
 
         Ok(Self {
             payload: serde_json::from_str(payload)
