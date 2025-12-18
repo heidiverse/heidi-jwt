@@ -30,6 +30,12 @@ pub struct JwkSet(
     pub JoseJwkSet,
 );
 
+impl Default for JwkSet {
+    fn default() -> Self {
+        Self(JoseJwkSet::new())
+    }
+}
+
 impl JwkSet {
     fn serialize_to_string<S>(set: &JoseJwkSet, serializer: S) -> Result<S::Ok, S::Error>
     where
