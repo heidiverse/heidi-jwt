@@ -233,8 +233,12 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
     pub fn verify_signature(&self, jwk_set: &JwkSet) -> Result<(), JwtError> {
         let header = josekit::jwt::decode_header(self.jwt_at(0))
             .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?;
-        let Some(verifier) = jwk_set.verifier_for(header.claim("kid").unwrap().as_str().unwrap())
-        else {
+        let Some(kid) = header.claim("kid").and_then(|a| a.as_str()) else {
+            return Err(JwtError::Jws(JwsError::InvalidHeader(format!(
+                "Missing kid claim"
+            ))));
+        };
+        let Some(verifier) = jwk_set.verifier_for(kid) else {
             return Err(JwtError::Jws(JwsError::KeyNotFound(
                 "No matching key found".to_string(),
             )));
