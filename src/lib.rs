@@ -25,3 +25,43 @@ pub use josekit::JoseError;
 pub use josekit::jwe;
 pub use josekit::jwk::{Jwk, JwkSet};
 pub use josekit::jws::*;
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use josekit::jws::{JwsHeader, alg::ecdsa::EcdsaJwsAlgorithm::Es256};
+    use serde_json::json;
+
+    use crate::jwt::{Jwt, creator::JwtCreator};
+
+    #[test]
+    fn test_float_or_int() {
+        let t: serde_json::Value = json!({
+            "iat": 1000.23,
+            "exp": 42,
+            "nbf": 1000.23,
+            "test" : "hallo"
+        });
+        let jws_keypair = Es256.generate_key_pair().unwrap();
+        let signer = Es256
+            .signer_from_jwk(&jws_keypair.to_jwk_key_pair())
+            .unwrap();
+        let mut header = JwsHeader::new();
+        header.set_algorithm(Es256.name());
+        let jwt = t
+            .create_jwt(&header, None, chrono::Duration::seconds(3600), &signer)
+            .unwrap();
+        let p = Jwt::<serde_json::Value>::from_str(&jwt).unwrap();
+        let unverified = p.payload_unverified();
+
+        assert_eq!(
+            unverified.insecure().get("iat").unwrap().as_f64().unwrap(),
+            1000.23
+        );
+        assert_eq!(
+            unverified.insecure().get("exp").unwrap().as_i64().unwrap(),
+            42
+        );
+    }
+}

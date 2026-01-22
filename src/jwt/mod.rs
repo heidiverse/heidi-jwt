@@ -27,7 +27,7 @@ use josekit::{
     jwk::Jwk,
     jws::{JwsHeader, JwsSigner, JwsVerifier},
 };
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 use tracing::instrument;
 use x509_cert::der::{Decode, Encode};
@@ -41,14 +41,46 @@ use crate::models::{
 pub mod creator;
 pub mod verifier;
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[serde(untagged)]
+pub enum FloatOrInt {
+    Float(f64),
+    Int(i64),
+}
+impl PartialEq<i64> for FloatOrInt {
+    fn eq(&self, other: &i64) -> bool {
+        self.as_i64() == *other
+    }
+}
+impl PartialOrd<i64> for FloatOrInt {
+    fn partial_cmp(&self, other: &i64) -> Option<std::cmp::Ordering> {
+        self.as_i64().partial_cmp(other)
+    }
+}
+
+impl FloatOrInt {
+    pub fn as_f64(&self) -> f64 {
+        match self {
+            FloatOrInt::Float(f) => *f,
+            FloatOrInt::Int(i) => *i as f64,
+        }
+    }
+    pub fn as_i64(&self) -> i64 {
+        match self {
+            FloatOrInt::Float(f) => *f as i64,
+            FloatOrInt::Int(i) => *i,
+        }
+    }
+}
+
 pub mod jwt_rfc7519 {
-    use crate::models;
+    use crate::{jwt::FloatOrInt, models};
     models!(
         #[derive(Default, Debug)]
         pub struct TimeValidity {
-            not_before ("nbf"): Option<i64>,
-            expires_at ("exp"): Option<i64>,
-            issued_at ("iat"): Option<i64>,
+            not_before ("nbf"): Option<FloatOrInt>,
+            expires_at ("exp"): Option<FloatOrInt>,
+            issued_at ("iat"): Option<FloatOrInt>,
         }
     );
     models!(

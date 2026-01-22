@@ -53,10 +53,16 @@ where
         if let Some(issuer) = issuer {
             val["iss"] = serde_json::Value::String(issuer.to_string());
         }
-        val["iat"] = serde_json::Value::Number(now.timestamp().into());
+        if val["iat"].is_null() {
+            val["iat"] = serde_json::Value::Number(now.timestamp().into());
+        }
         // account for clock skew
-        val["nbf"] = serde_json::Value::Number((now - Duration::minutes(5)).timestamp().into());
-        val["exp"] = serde_json::Value::Number((now + lifetime).timestamp().into());
+        if val["nbf"].is_null() {
+            val["nbf"] = serde_json::Value::Number((now - Duration::minutes(5)).timestamp().into());
+        }
+        if val["exp"].is_null() {
+            val["exp"] = serde_json::Value::Number((now + lifetime).timestamp().into());
+        }
         let payload = BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_string(&val).map_err(|e| {
             JwtError::Payload(PayloadError::InvalidPayload(format!("Serde-Error: {e}")))
         })?);
