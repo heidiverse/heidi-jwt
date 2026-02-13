@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
 use josekit::{
@@ -23,12 +25,13 @@ pub trait Signer {
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, JwtError>;
 }
 
-impl<T> Signer for T
+impl<T> Signer for Box<T>
 where
-    T: JwsSigner,
+    T: JwsSigner + ?Sized,
 {
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, JwtError> {
-        self.sign(data)
+        self.as_ref()
+            .sign(data)
             .map_err(|e| JwtError::Jws(JwsError::InvalidSignature(format!("Signing-Error: {e}"))))
     }
 }
@@ -110,7 +113,12 @@ mod tests {
             id: "1".to_string(),
             name: "John".to_string(),
         }
-        .create_jwt(&header, Some("test-issuer"), Duration::minutes(5), &signer)
+        .create_jwt(
+            &header,
+            Some("test-issuer"),
+            Duration::minutes(5),
+            &Box::new(signer),
+        )
         .unwrap();
 
         println!("{jwt}");

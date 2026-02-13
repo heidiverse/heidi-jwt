@@ -50,7 +50,12 @@ mod tests {
         let mut header = JwsHeader::new();
         header.set_algorithm(Es256.name());
         let jwt = t
-            .create_jwt(&header, None, chrono::Duration::seconds(3600), &signer)
+            .create_jwt(
+                &header,
+                None,
+                chrono::Duration::seconds(3600),
+                &Box::new(signer),
+            )
             .unwrap();
         let p = Jwt::<serde_json::Value>::from_str(&jwt).unwrap();
         let unverified = p.payload_unverified();
@@ -63,5 +68,37 @@ mod tests {
             unverified.insecure().get("exp").unwrap().as_i64().unwrap(),
             42
         );
+    }
+    #[test]
+    fn test_payload_parse() {
+        let jwt_str = "eyJhbGciOiJFUzI1NiIsImp3ayI6eyJjcnYiOiJQLTI1NiIsImt0eSI6IkVDIiwieCI6ImlVbE96RF9HOV9tODkwNmpfMTk1WXIzSXBlNlhtWS1Ld2dicmhzTVI4M28iLCJ5IjoiYjU1TEQ5NFVhVVh3VUhxMGN1QnJyMERQRk5EZUFzRTQ5UzhEVjJlaVBibyJ9LCJ0eXAiOiJrYitqd3QifQ.eyJpYXQiOjE3NjkwNzg4NDQuMzA0MDY2LCJhdWQiOiJjaC5hZG1pbi5zd2l5dWNoZWNrIiwic2RfaGFzaCI6IkNGWF9paUxBNjM4TUlDUW9veXBOdVJFeHBEczJjTXVac2luOXFpbDhqSHcifQ.FYQzJ1vmFFNF9e3YoBSSh3lTxDY-7gBlZvbX8SHKmW6KB1LkoJtThIxALrdcwkvtZIzmQHnXK9Afv1hVsOZHEQ";
+        let t = Jwt::<serde_json::Value>::from_str(jwt_str).unwrap();
+        println!(
+            "{}",
+            t.payload_unverified()
+                .insecure()
+                .get("iat")
+                .unwrap()
+                .as_f64()
+                .unwrap()
+        );
+    }
+    #[test]
+    fn test_parse_key() {
+        let privatekey = r#"-----BEGIN EC PRIVATE KEY-----
+        MHcCAQEEIKgaNo3YMVBLkbpvyrKMS7rR0Ey8G7BqM1BzL18iYY52oAoGCCqGSM49
+        AwEHoUQDQgAEWvKFuI1SuxSeydyxBVEdJRqQhz1TvV87Niy0KhkTii4tXWRL9vww
+        RJVQEx63tA/+uc5uNpm1MJ3cANXQAGKXsw==
+        -----END EC PRIVATE KEY-----"#;
+        let s = Es256.key_pair_from_pem(privatekey).unwrap();
+        println!(
+            "{}",
+            s.to_jwk_private_key()
+                .parameter("d")
+                .unwrap()
+                .as_str()
+                .unwrap()
+        );
+        let sig = Es256.signer_from_pem(privatekey).unwrap();
     }
 }
