@@ -30,6 +30,7 @@ pub use josekit::jws::*;
 mod tests {
     use std::str::FromStr;
 
+    use base64::{Engine, prelude::BASE64_STANDARD};
     use josekit::jws::{JwsHeader, alg::ecdsa::EcdsaJwsAlgorithm::Es256};
     use serde_json::json;
 
@@ -86,9 +87,9 @@ mod tests {
     #[test]
     fn test_parse_key() {
         let privatekey = r#"-----BEGIN EC PRIVATE KEY-----
-        MHcCAQEEIKgaNo3YMVBLkbpvyrKMS7rR0Ey8G7BqM1BzL18iYY52oAoGCCqGSM49
-        AwEHoUQDQgAEWvKFuI1SuxSeydyxBVEdJRqQhz1TvV87Niy0KhkTii4tXWRL9vww
-        RJVQEx63tA/+uc5uNpm1MJ3cANXQAGKXsw==
+        MGsCAQEEIJDTZuhqP1I1aXzhovYlJDNQu82654Ix4L5GnK8M+sJsoUQDQgAE8HCr
+        Uv4fHF+Wbojb+sIjgujr7pPZNGP0EzduTBo1DpOu1hMZk7auKBnRSZFAiJD1sxqt
+        1nD5vNU0ddhsMqLfzg==
         -----END EC PRIVATE KEY-----"#;
         let s = Es256.key_pair_from_pem(privatekey).unwrap();
         println!(
