@@ -201,9 +201,9 @@ impl From<&Value> for serde_json::Value {
                 serde_json::Value::Number(serde_json::Number::from_f64(f.into()).unwrap())
             }
             Value::String(s) => serde_json::Value::String(s.clone()),
-            Value::Array(a) => serde_json::Value::Array(a.into_iter().map(|v| v.into()).collect()),
+            Value::Array(a) => serde_json::Value::Array(a.iter().map(|v| v.into()).collect()),
             Value::Object(o) => serde_json::Value::Object(
-                o.into_iter().map(|(k, v)| (k.clone(), v.into())).collect(),
+                o.iter().map(|(k, v)| (k.clone(), v.into())).collect(),
             ),
         }
     }
@@ -226,10 +226,10 @@ impl From<&Value> for Option<serde_json::Value> {
             )),
             Value::String(s) => Some(serde_json::Value::String(s.clone())),
             Value::Array(a) => Some(serde_json::Value::Array(
-                a.into_iter().map(|v| v.clone().into()).collect(),
+                a.iter().map(|v| v.clone().into()).collect(),
             )),
             Value::Object(o) => Some(serde_json::Value::Object(
-                o.into_iter()
+                o.iter()
                     .map(|(k, v)| (k.clone(), serde_json::Value::from(v.clone())))
                     .collect(),
             )),

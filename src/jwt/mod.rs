@@ -143,18 +143,16 @@ where
             .insecure()
             .write_to_transformer(&mut time_parts);
 
-        if let Some(nbf) = time_parts.not_before {
-            if nbf > time {
+        if let Some(nbf) = time_parts.not_before
+            && nbf > time {
                 return Err(JwtError::Jws(JwsError::NotYetValid(
                     "JWT not yet valid".to_string(),
                 )));
             }
-        }
-        if let Some(exp) = time_parts.expires_at {
-            if exp < time {
+        if let Some(exp) = time_parts.expires_at
+            && exp < time {
                 return Err(JwtError::Jws(JwsError::Expired("JWT expired".to_string())));
             }
-        }
         Ok(())
     }
     fn verify_body(&self, jwt: &Jwt<T>) -> Result<(), JwtError>;
@@ -255,9 +253,7 @@ where
         let header = josekit::jwt::decode_header(self.jwt_at(0))
             .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?;
         let Some(kid) = header.claim("kid").and_then(|a| a.as_str()) else {
-            return Err(JwtError::Jws(JwsError::InvalidHeader(format!(
-                "Missing kid claim"
-            ))));
+            return Err(JwtError::Jws(JwsError::InvalidHeader("Missing kid claim".to_string())));
         };
         let Some(verifier) = jwk_set.verifier_for(kid) else {
             return Err(JwtError::Jws(JwsError::KeyNotFound(
@@ -296,7 +292,7 @@ impl<T: Serialize + DeserializeOwned> GeneralizedBody for Jwt<T> {
 impl<T: Serialize + DeserializeOwned> GeneralizedBody for Jwt<DetachedPayload<T>> {
     fn generalized_payload_unverified<'a>(&'a self) -> Unverified<'a, &'a serde_json::Value> {
         Unverified::new(
-            &self
+            self
                 .payload
                 .generalized_payload
                 .as_ref()
@@ -371,9 +367,7 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
         self.payload
             .payload
             .as_ref()
-            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(format!(
-                "No payload specified"
-            ))))
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload("No payload specified".to_string())))
     }
     pub fn payload_with_verifier_from_header(
         &self,
@@ -383,21 +377,17 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
             self.header()?
                 .as_any()
                 .downcast_ref::<JwsHeader>()
-                .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader(format!("invalid header"))))?,
+                .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader("invalid header".to_string())))?,
         )
         .ok_or_else(|| {
-            JwtError::Jws(JwsError::InvalidHeader(format!(
-                "cannot extract signature verifier"
-            )))
+            JwtError::Jws(JwsError::InvalidHeader("cannot extract signature verifier".to_string()))
         })?;
         self.verify_signature_with_verifier(signature_verifier.as_ref())?;
         self.verify(jwt_verifier)?;
         self.payload
             .payload
             .as_ref()
-            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(format!(
-                "No payload specified"
-            ))))
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload("No payload specified".to_string())))
     }
     pub fn payload_with_verifier(
         &self,
@@ -409,9 +399,7 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
         self.payload
             .payload
             .as_ref()
-            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(format!(
-                "No payload specified"
-            ))))
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload("No payload specified".to_string())))
     }
     pub fn payload_with_verifier_from_keyset(
         &self,
@@ -423,9 +411,7 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
         self.payload
             .payload
             .as_ref()
-            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(format!(
-                "No payload specified"
-            ))))
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload("No payload specified".to_string())))
     }
     pub fn payload_unverified<'a>(&'a self) -> Option<Unverified<'a, &'a T>> {
         self.payload.payload.as_ref().map(|a| Unverified::new(a))
@@ -477,12 +463,10 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
             self.header()?
                 .as_any()
                 .downcast_ref::<JwsHeader>()
-                .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader(format!("invalid header"))))?,
+                .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader("invalid header".to_string())))?,
         )
         .ok_or_else(|| {
-            JwtError::Jws(JwsError::InvalidHeader(format!(
-                "cannot extract signature verifier"
-            )))
+            JwtError::Jws(JwsError::InvalidHeader("cannot extract signature verifier".to_string()))
         })?;
         self.verify_signature_with_verifier(signature_verifier.as_ref())?;
         self.verify(jwt_verifier)?;
@@ -585,7 +569,7 @@ where
         let payload = DetachedPayload::new(payload);
 
         Ok(Self {
-            payload: payload,
+            payload,
             generalized_payload: serde_json::Value::Null,
             original_payload,
             signatures: vec![Signature {
@@ -792,7 +776,7 @@ pub fn check_x5c_chain(chain: &[Vec<u8>]) -> Result<(), JwtError> {
             {
                 return Err(JwsError::InvalidSignature(format!(
                     "certificate has invalid signature {}",
-                    last_child.tbs_certificate.subject.to_string()
+                    last_child.tbs_certificate.subject
                 ))
                 .into());
             };
@@ -849,7 +833,7 @@ pub fn verifier_for_der(der: &[u8]) -> Result<Box<dyn JwsVerifier>, JwtError> {
         };
         return Ok(Box::new(verifier));
     }
-    Err(X509Error::InvalidAlgorithm(format!("Invalid Algorithm")).into())
+    Err(X509Error::InvalidAlgorithm("Invalid Algorithm".to_string()).into())
 }
 
 #[tracing::instrument]
@@ -868,7 +852,7 @@ pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
     ] {
         if alg.name() == alg_name {
             if let Some(x5c) = header.x509_certificate_chain() {
-                let x509 = x509_cert::Certificate::from_der(&x5c.first()?).ok()?;
+                let x509 = x509_cert::Certificate::from_der(x5c.first()?).ok()?;
                 let verifier = alg
                     .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
                     .ok()?;
@@ -885,15 +869,14 @@ pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
         josekit::jws::RS384,
         josekit::jws::RS512,
     ] {
-        if alg.name() == alg_name {
-            if let Some(x5c) = header.x509_certificate_chain() {
-                let x509 = x509_cert::Certificate::from_der(&x5c.first()?).ok()?;
+        if alg.name() == alg_name
+            && let Some(x5c) = header.x509_certificate_chain() {
+                let x509 = x509_cert::Certificate::from_der(x5c.first()?).ok()?;
                 let verifier = alg
                     .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
                     .ok()?;
                 return Some(Box::new(verifier));
             }
-        }
         if let Some(jwk) = header.jwk() {
             let verifier = alg.verifier_from_jwk(&jwk).ok()?;
             return Some(Box::new(verifier));
@@ -904,30 +887,29 @@ pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
         josekit::jws::PS384,
         josekit::jws::PS512,
     ] {
-        if alg.name() == alg_name {
-            if let Some(x5c) = header.x509_certificate_chain() {
-                let x509 = x509_cert::Certificate::from_der(&x5c.first()?).ok()?;
+        if alg.name() == alg_name
+            && let Some(x5c) = header.x509_certificate_chain() {
+                let x509 = x509_cert::Certificate::from_der(x5c.first()?).ok()?;
                 let verifier = alg
                     .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
                     .ok()?;
                 return Some(Box::new(verifier));
             }
-        }
         if let Some(jwk) = header.jwk() {
             let verifier = alg.verifier_from_jwk(&jwk).ok()?;
             return Some(Box::new(verifier));
         }
     }
-    for alg in [josekit::jws::EdDSA] {
-        if alg.name() == alg_name {
-            if let Some(x5c) = header.x509_certificate_chain() {
-                let x509 = x509_cert::Certificate::from_der(&x5c.first()?).ok()?;
+    {
+        let alg = josekit::jws::EdDSA;
+        if alg.name() == alg_name
+            && let Some(x5c) = header.x509_certificate_chain() {
+                let x509 = x509_cert::Certificate::from_der(x5c.first()?).ok()?;
                 let verifier = alg
                     .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
                     .ok()?;
                 return Some(Box::new(verifier));
             }
-        }
         if let Some(jwk) = header.jwk() {
             let verifier = alg.verifier_from_jwk(&jwk).ok()?;
             return Some(Box::new(verifier));
@@ -953,39 +935,39 @@ pub fn ec_verifier_from_sec1(sec1_bytes: &[u8], crv: &str) -> Option<Box<dyn Jws
         "use" : "sig"
     });
     let jwk: Jwk = serde_json::from_value(jwk).ok()?;
-    return match crv {
+    match crv {
         "P-256" => Some(Box::new(josekit::jws::ES256.verifier_from_jwk(&jwk).ok()?)),
         "P-384" => Some(Box::new(josekit::jws::ES384.verifier_from_jwk(&jwk).ok()?)),
         "P-521" => Some(Box::new(josekit::jws::ES512.verifier_from_jwk(&jwk).ok()?)),
         _ => None,
-    };
+    }
 }
 
 /// Get a verifier from an encoded HMAC key.
 pub fn hmac_verifier_from_bytes(bytes: &[u8], alg: &str) -> Option<Box<dyn JwsVerifier>> {
-    return match alg {
+    match alg {
         "HS256" => Some(Box::new(
-            josekit::jws::HS256.verifier_from_bytes(&bytes).ok()?,
+            josekit::jws::HS256.verifier_from_bytes(bytes).ok()?,
         )),
         "HS384" => Some(Box::new(
-            josekit::jws::HS384.verifier_from_bytes(&bytes).ok()?,
+            josekit::jws::HS384.verifier_from_bytes(bytes).ok()?,
         )),
         "HS512" => Some(Box::new(
-            josekit::jws::HS512.verifier_from_bytes(&bytes).ok()?,
+            josekit::jws::HS512.verifier_from_bytes(bytes).ok()?,
         )),
         _ => None,
-    };
+    }
 }
 
 /// Get a verifier from an encoded RSA key.
 pub fn rsa_verifier_from_der(der: &[u8], alg: &str) -> Option<Box<dyn JwsVerifier>> {
     match alg {
-        "RS256" => Some(Box::new(josekit::jws::RS256.verifier_from_der(&der).ok()?)),
-        "RS384" => Some(Box::new(josekit::jws::RS384.verifier_from_der(&der).ok()?)),
-        "RS512" => Some(Box::new(josekit::jws::RS512.verifier_from_der(&der).ok()?)),
-        "PS256" => Some(Box::new(josekit::jws::PS256.verifier_from_der(&der).ok()?)),
-        "PS384" => Some(Box::new(josekit::jws::PS384.verifier_from_der(&der).ok()?)),
-        "PS512" => Some(Box::new(josekit::jws::PS512.verifier_from_der(&der).ok()?)),
+        "RS256" => Some(Box::new(josekit::jws::RS256.verifier_from_der(der).ok()?)),
+        "RS384" => Some(Box::new(josekit::jws::RS384.verifier_from_der(der).ok()?)),
+        "RS512" => Some(Box::new(josekit::jws::RS512.verifier_from_der(der).ok()?)),
+        "PS256" => Some(Box::new(josekit::jws::PS256.verifier_from_der(der).ok()?)),
+        "PS384" => Some(Box::new(josekit::jws::PS384.verifier_from_der(der).ok()?)),
+        "PS512" => Some(Box::new(josekit::jws::PS512.verifier_from_der(der).ok()?)),
         _ => None,
     }
 }
@@ -1003,10 +985,10 @@ pub fn eddsa_verifier_from_bytes(bytes: &[u8], crv: &str) -> Option<Box<dyn JwsV
         "use" : "sig"
     });
     let jwk: Jwk = serde_json::from_value(jwk).ok()?;
-    return match crv {
+    match crv {
         "Ed25519" | "Ed448" => Some(Box::new(josekit::jws::EdDSA.verifier_from_jwk(&jwk).ok()?)),
         _ => None,
-    };
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,3 @@
-use std::ops::Deref;
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
@@ -72,7 +71,7 @@ where
         let header = BASE64_URL_SAFE_NO_PAD.encode(header.to_string());
         let mut jwt = format!("{}.{}", header, payload);
         let signature = BASE64_URL_SAFE_NO_PAD.encode(signer.sign(jwt.as_bytes())?);
-        jwt.push_str(".");
+        jwt.push('.');
         jwt.push_str(&signature);
         Ok(jwt)
     }
