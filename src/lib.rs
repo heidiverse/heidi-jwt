@@ -30,7 +30,6 @@ pub use josekit::jws::*;
 mod tests {
     use std::str::FromStr;
 
-    use base64::{Engine, prelude::BASE64_STANDARD};
     use josekit::jws::{JwsHeader, alg::ecdsa::EcdsaJwsAlgorithm::Es256};
     use serde_json::json;
 
