@@ -4,7 +4,7 @@ use crate::{
     jwt::JwtVerifier,
     models::{
         self,
-        errors::{JwtError, PayloadError},
+        errors::{JwsError, JwtError, PayloadError},
     },
 };
 
@@ -28,6 +28,14 @@ impl DefaultVerifier {
 
 impl<T: Serialize + DeserializeOwned> JwtVerifier<T> for DefaultVerifier {
     fn verify_header(&self, jwt: &super::Jwt<T>) -> Result<(), crate::models::errors::JwtError> {
+        let header = jwt.header()?;
+        let crit = header.critical();
+        if crit.is_some() {
+            return Err(JwtError::Jws(JwsError::InvalidHeader(format!(
+                "unknown crit: {:?}",
+                crit
+            ))));
+        }
         self.assert_type(jwt, &self.jwt_type)
     }
 
