@@ -92,7 +92,19 @@ pub mod jwt_rfc7519 {
     );
 }
 
-pub trait JwtVerifier<T: Serialize + DeserializeOwned> {
+pub trait JwtBody {}
+impl<T> JwtBody for T where T: Serialize + DeserializeOwned {}
+impl<T> JwtBody for DetachedPayload<T> where T: Serialize + DeserializeOwned {}
+
+pub trait GeneralizedBody {
+    fn generalized_payload_unverified<'a>(&'a self) -> Unverified<'a, &'a serde_json::Value>;
+    fn jwt_at(&self, index: usize) -> String;
+}
+
+pub trait JwtVerifier<T: JwtBody>
+where
+    Jwt<T>: GeneralizedBody,
+{
     fn jws_header(&self, jwt: &Jwt<T>) -> Result<JwsHeader, JwtError> {
         let header = jwt.header()?;
         let Some(jws_header) = header.as_any().downcast_ref::<JwsHeader>() else {
@@ -151,7 +163,7 @@ pub trait JwtVerifier<T: Serialize + DeserializeOwned> {
 pub trait Jwtable: Serialize + DeserializeOwned + Debug {}
 
 #[derive(Clone)]
-pub struct Jwt<T: Serialize + DeserializeOwned> {
+pub struct Jwt<T> {
     payload: T,
     generalized_payload: serde_json::Value,
     pub original_payload: String,
@@ -167,6 +179,16 @@ impl<T: Serialize + DeserializeOwned> Debug for Jwt<T> {
     }
 }
 
+impl<T: Serialize + DeserializeOwned> Debug for Jwt<DetachedPayload<T>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Jwt")
+            .field("payload", &serde_json::to_string(&self.payload.payload))
+            .field("original_payload", &self.original_payload)
+            .field("signatures", &self.signatures)
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Signature {
     pub signature: String,
@@ -174,7 +196,10 @@ pub struct Signature {
     pub header: Option<String>,
 }
 
-impl<T: Serialize + DeserializeOwned> Jwt<T> {
+impl<T: JwtBody> Jwt<T>
+where
+    Jwt<T>: GeneralizedBody,
+{
     pub fn header(&self) -> Result<JwsHeader, JwtError> {
         josekit::jwt::decode_header(self.jwt_at(0))
             .map(|h| {
@@ -187,7 +212,227 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
             })
             .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?
     }
+    pub fn verify(&self, verifier: &dyn JwtVerifier<T>) -> Result<(), JwtError> {
+        verifier.verify_header(self)?;
+        verifier.verify_time(self)?;
+        verifier.verify_body(self)?;
+        Ok(())
+    }
+    #[instrument(skip(self, verifier), err)]
+    pub fn verify_signature_with_verifier(
+        &self,
+        verifier: &dyn JwsVerifier,
+    ) -> Result<(), JwtError> {
+        let header = josekit::jwt::decode_header(self.jwt_at(0))
+            .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?;
+        if verifier.algorithm().name()
+            != header
+                .as_any()
+                .downcast_ref::<JwsHeader>()
+                .unwrap()
+                .algorithm()
+                .unwrap()
+        {
+            return Err(JwsError::InvalidHeader("algorithm not matching".to_string()).into());
+        }
+        for s in &self.signatures {
+            let sig_bytes = base64::prelude::BASE64_URL_SAFE_NO_PAD
+                .decode(&s.signature)
+                .map_err(|e| JwsError::EncodingError(format!("{e}")))?;
+            println!("alg: {}", verifier.algorithm().name());
 
+            verifier
+                .verify(
+                    format!("{}.{}", s.protected, self.original_payload).as_bytes(),
+                    sig_bytes.as_slice(),
+                )
+                .map_err(|e| JwsError::InvalidSignature(format!("{e}")))?;
+        }
+        Ok(())
+    }
+    #[instrument(skip(self, jwk_set), err)]
+    pub fn verify_signature(&self, jwk_set: &JwkSet) -> Result<(), JwtError> {
+        let header = josekit::jwt::decode_header(self.jwt_at(0))
+            .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?;
+        let Some(kid) = header.claim("kid").and_then(|a| a.as_str()) else {
+            return Err(JwtError::Jws(JwsError::InvalidHeader(format!(
+                "Missing kid claim"
+            ))));
+        };
+        let Some(verifier) = jwk_set.verifier_for(kid) else {
+            return Err(JwtError::Jws(JwsError::KeyNotFound(
+                "No matching key found".to_string(),
+            )));
+        };
+        for s in &self.signatures {
+            let sig_bytes = base64::prelude::BASE64_URL_SAFE_NO_PAD
+                .decode(&s.signature)
+                .map_err(|e| JwsError::EncodingError(format!("{e}")))?;
+            println!("alg: {}", verifier.algorithm().name());
+
+            verifier
+                .verify(
+                    format!("{}.{}", s.protected, self.original_payload).as_bytes(),
+                    sig_bytes.as_slice(),
+                )
+                .map_err(|e| JwsError::InvalidSignature(format!("{e}")))?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: Serialize + DeserializeOwned> GeneralizedBody for Jwt<T> {
+    fn generalized_payload_unverified<'a>(&'a self) -> Unverified<'a, &'a serde_json::Value> {
+        Unverified::new(&self.generalized_payload)
+    }
+    fn jwt_at(&self, index: usize) -> String {
+        let sig = self.signatures.get(index).unwrap();
+        format!(
+            "{}.{}.{}",
+            sig.protected, self.original_payload, sig.signature
+        )
+    }
+}
+impl<T: Serialize + DeserializeOwned> GeneralizedBody for Jwt<DetachedPayload<T>> {
+    fn generalized_payload_unverified<'a>(&'a self) -> Unverified<'a, &'a serde_json::Value> {
+        Unverified::new(
+            &self
+                .payload
+                .generalized_payload
+                .as_ref()
+                .unwrap_or(&josekit::Value::Null),
+        )
+    }
+    fn jwt_at(&self, index: usize) -> String {
+        let sig = self.signatures.get(index).unwrap();
+        format!("{}..{}", sig.protected, sig.signature)
+    }
+}
+
+impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
+    pub fn set_payload(&mut self, payload: &str) {
+        let Ok(h) = self.header() else {
+            return;
+        };
+
+        self.payload = if h.base64url_encode_payload().unwrap_or(true) {
+            let Ok(decoded_payload) = BASE64_URL_SAFE_NO_PAD.decode(payload) else {
+                return;
+            };
+            let Ok(s) = std::str::from_utf8(&decoded_payload) else {
+                return;
+            };
+            DetachedPayload::new_with_encoded_payload(payload, s)
+        } else {
+            DetachedPayload::new(payload)
+        };
+
+        self.original_payload = self.payload.original_payload.clone();
+        if let Some(gp) = self.payload.generalized_payload.as_ref() {
+            self.generalized_payload = gp.clone();
+        }
+    }
+    pub fn verifier_from_embedded_jwk(
+        &self,
+    ) -> Result<Vec<(String, Box<dyn JwsVerifier>)>, JwtError> {
+        let Some(jwks) = self
+            .payload
+            .generalized_payload
+            .as_ref()
+            .and_then(|a| a.get("jwks"))
+            .and_then(|a| a.get("keys"))
+            .and_then(|a| a.as_array())
+        else {
+            return Err(JwtError::Payload(PayloadError::MissingRequiredProperty(
+                "jwks".to_string(),
+            )));
+        };
+        let mut verifiers = vec![];
+        for key in jwks {
+            let Ok(jwk) = serde_json::from_value::<Jwk>(key.clone()) else {
+                continue;
+            };
+            let key_id = jwk.key_id().unwrap_or_default().to_string();
+            let Some(verifier) = verifier_for_jwk(jwk) else {
+                continue;
+            };
+            verifiers.push((key_id, verifier));
+        }
+        Ok(verifiers)
+    }
+
+    pub fn payload(
+        &self,
+        jwk_set: &JwkSet,
+        jwt_verifier: &dyn JwtVerifier<DetachedPayload<T>>,
+    ) -> Result<&T, JwtError> {
+        self.verify_signature(jwk_set)?;
+        self.verify(jwt_verifier)?;
+        self.payload
+            .payload
+            .as_ref()
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(format!(
+                "No payload specified"
+            ))))
+    }
+    pub fn payload_with_verifier_from_header(
+        &self,
+        jwt_verifier: &dyn JwtVerifier<DetachedPayload<T>>,
+    ) -> Result<&T, JwtError> {
+        let signature_verifier = verifier_for_header(
+            self.header()?
+                .as_any()
+                .downcast_ref::<JwsHeader>()
+                .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader(format!("invalid header"))))?,
+        )
+        .ok_or_else(|| {
+            JwtError::Jws(JwsError::InvalidHeader(format!(
+                "cannot extract signature verifier"
+            )))
+        })?;
+        self.verify_signature_with_verifier(signature_verifier.as_ref())?;
+        self.verify(jwt_verifier)?;
+        self.payload
+            .payload
+            .as_ref()
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(format!(
+                "No payload specified"
+            ))))
+    }
+    pub fn payload_with_verifier(
+        &self,
+        signature_verifier: &dyn JwsVerifier,
+        jwt_verifier: &dyn JwtVerifier<DetachedPayload<T>>,
+    ) -> Result<&T, JwtError> {
+        self.verify_signature_with_verifier(signature_verifier)?;
+        self.verify(jwt_verifier)?;
+        self.payload
+            .payload
+            .as_ref()
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(format!(
+                "No payload specified"
+            ))))
+    }
+    pub fn payload_with_verifier_from_keyset(
+        &self,
+        key_set: &JwkSet,
+        jwt_verifier: &dyn JwtVerifier<DetachedPayload<T>>,
+    ) -> Result<&T, JwtError> {
+        self.verify_signature(key_set)?;
+        self.verify(jwt_verifier)?;
+        self.payload
+            .payload
+            .as_ref()
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(format!(
+                "No payload specified"
+            ))))
+    }
+    pub fn payload_unverified<'a>(&'a self) -> Option<Unverified<'a, &'a T>> {
+        self.payload.payload.as_ref().map(|a| Unverified::new(a))
+    }
+}
+
+impl<T: Serialize + DeserializeOwned> Jwt<T> {
     pub fn verifier_from_embedded_jwk(
         &self,
     ) -> Result<Vec<(String, Box<dyn JwsVerifier>)>, JwtError> {
@@ -261,87 +506,10 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
         self.verify(jwt_verifier)?;
         Ok(&self.payload)
     }
-    #[instrument(skip(self, jwk_set), err)]
-    pub fn verify_signature(&self, jwk_set: &JwkSet) -> Result<(), JwtError> {
-        let header = josekit::jwt::decode_header(self.jwt_at(0))
-            .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?;
-        let Some(kid) = header.claim("kid").and_then(|a| a.as_str()) else {
-            return Err(JwtError::Jws(JwsError::InvalidHeader(format!(
-                "Missing kid claim"
-            ))));
-        };
-        let Some(verifier) = jwk_set.verifier_for(kid) else {
-            return Err(JwtError::Jws(JwsError::KeyNotFound(
-                "No matching key found".to_string(),
-            )));
-        };
-        for s in &self.signatures {
-            let sig_bytes = base64::prelude::BASE64_URL_SAFE_NO_PAD
-                .decode(&s.signature)
-                .map_err(|e| JwsError::EncodingError(format!("{e}")))?;
-            println!("alg: {}", verifier.algorithm().name());
 
-            verifier
-                .verify(
-                    format!("{}.{}", s.protected, self.original_payload).as_bytes(),
-                    sig_bytes.as_slice(),
-                )
-                .map_err(|e| JwsError::InvalidSignature(format!("{e}")))?;
-        }
-        Ok(())
-    }
-    #[instrument(skip(self, verifier), err)]
-    pub fn verify_signature_with_verifier(
-        &self,
-        verifier: &dyn JwsVerifier,
-    ) -> Result<(), JwtError> {
-        let header = josekit::jwt::decode_header(self.jwt_at(0))
-            .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?;
-        if verifier.algorithm().name()
-            != header
-                .as_any()
-                .downcast_ref::<JwsHeader>()
-                .unwrap()
-                .algorithm()
-                .unwrap()
-        {
-            return Err(JwsError::InvalidHeader("algorithm not matching".to_string()).into());
-        }
-        for s in &self.signatures {
-            let sig_bytes = base64::prelude::BASE64_URL_SAFE_NO_PAD
-                .decode(&s.signature)
-                .map_err(|e| JwsError::EncodingError(format!("{e}")))?;
-            println!("alg: {}", verifier.algorithm().name());
-
-            verifier
-                .verify(
-                    format!("{}.{}", s.protected, self.original_payload).as_bytes(),
-                    sig_bytes.as_slice(),
-                )
-                .map_err(|e| JwsError::InvalidSignature(format!("{e}")))?;
-        }
-        Ok(())
-    }
-    pub fn verify(&self, verifier: &dyn JwtVerifier<T>) -> Result<(), JwtError> {
-        verifier.verify_header(self)?;
-        verifier.verify_time(self)?;
-        verifier.verify_body(self)?;
-        Ok(())
-    }
-
-    pub fn generalized_payload_unverified(&self) -> Unverified<&serde_json::Value> {
-        Unverified::new(&self.generalized_payload)
-    }
-    pub fn payload_unverified(&self) -> Unverified<&T> {
+    pub fn payload_unverified<'a>(&'a self) -> Unverified<'a, &'a T> {
         let p = &self.payload;
         Unverified::new(p)
-    }
-    pub fn jwt_at(&self, index: usize) -> String {
-        let sig = self.signatures.get(index).unwrap();
-        format!(
-            "{}.{}.{}",
-            sig.protected, self.original_payload, sig.signature
-        )
     }
 }
 pub struct Unverified<'a, T> {
@@ -357,6 +525,75 @@ impl<'a, T> Unverified<'a, &'a T> {
     }
     pub fn insecure(&self) -> &T {
         self.payload
+    }
+}
+
+pub struct DetachedPayload<T> {
+    payload: Option<T>,
+    generalized_payload: Option<serde_json::Value>,
+    original_payload: String,
+}
+impl<T: Serialize + DeserializeOwned> DetachedPayload<T> {
+    pub fn new(payload: &str) -> Self {
+        let p = serde_json::from_str(payload).ok();
+        let generalized_payload = serde_json::from_str(payload).ok();
+        Self {
+            payload: p,
+            generalized_payload,
+            original_payload: payload.to_string(),
+        }
+    }
+    pub fn new_with_encoded_payload(encoded_payload: &str, payload: &str) -> Self {
+        let p = serde_json::from_str(payload).ok();
+        let generalized_payload = serde_json::from_str(payload).ok();
+        Self {
+            payload: p,
+            generalized_payload,
+            original_payload: encoded_payload.to_string(),
+        }
+    }
+}
+
+impl<T> FromStr for Jwt<DetachedPayload<T>>
+where
+    T: Serialize + DeserializeOwned,
+{
+    type Err = JwtError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let binding = s.split('.').collect::<Vec<_>>();
+        let [header, payload, signature] = binding.as_slice() else {
+            return Err(JwsError::InvalidFormat("Invalid JWT format".to_string()).into());
+        };
+        let original_payload = payload.to_string();
+
+        let decoded_bytes = base64::prelude::BASE64_URL_SAFE_NO_PAD
+            .decode(payload)
+            .map_err(|e| {
+                JwtError::Payload(PayloadError::InvalidPayload(format!(
+                    "Base64 decode failed: {}",
+                    e
+                )))
+            })?;
+
+        let payload = std::str::from_utf8(&decoded_bytes).map_err(|e| {
+            JwtError::Payload(PayloadError::InvalidPayload(format!(
+                "UTF-8 decode failed: {}",
+                e
+            )))
+        })?;
+        let payload = DetachedPayload::new(payload);
+
+        Ok(Self {
+            payload: payload,
+            generalized_payload: serde_json::Value::Null,
+            original_payload,
+            signatures: vec![Signature {
+                signature: signature.to_string(),
+                protected: header.to_string(),
+                header: None,
+            }],
+        })
     }
 }
 
@@ -770,4 +1007,41 @@ pub fn eddsa_verifier_from_bytes(bytes: &[u8], crv: &str) -> Option<Box<dyn JwsV
         "Ed25519" | "Ed448" => Some(Box::new(josekit::jws::EdDSA.verifier_from_jwk(&jwk).ok()?)),
         _ => None,
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use josekit::jwk::Jwk;
+
+    use crate::jwt::{DetachedPayload, Jwt, verifier::DefaultVerifier, verifier_for_jwk};
+
+    #[test]
+    fn test_detached_jws() {
+        let mut detached_jws : Jwt<DetachedPayload<serde_json::Value>> = "eyJiNjQiOmZhbHNlLCJjcml0IjpbImI2NCJdLCJraWQiOiJkaWQ6dGR3OlFtYkJLVFYyZFpKYlZvNW0zSkVqWDZrQjhLUWEzanVqWThwSEZOakJ5bWNzeW46aWRlbnRpZmllci1yZWctci50cnVzdC1pbmZyYS5zd2l5dS5hZG1pbi5jaDphcGk6djE6ZGlkOjRkYzZkMDVkLWQ2ZjYtNGRiNi1hNWNhLTUwZmVmNTEyOWUwMCN2ZXJzaW9uLWFzc2VydGlvbi0xIiwidHlwIjoiSk9TRSIsImFsZyI6IkVTMjU2In0..9eq3qh5EPZWBnVdpMxhTuAMVoxmzEo9zMpAAVFpJeEYCji60VltL8v0M9ZUtsyjknTrZRFCI_7foJEYeWQgDeg".parse().unwrap();
+        detached_jws.set_payload(r#"{"app_id":"ch.admin.foitt.swiyucheck","default_message":[{"body":"Please update the application to continue using the service.","locale":"en-US","title":"Update Required"}],"default_support_lifetime_days":90,"device_blacklist":["samsung-sm-g610f","huawei-mha-l29"],"minimum_os_version":"13.0","platform":"android","store_url":"https://play.google.com/store/apps/details?id=ch.admin.foitt.swiyucheck","versions":[{"message":[{"body":"This version is no longer supported. Please update to continue.","locale":"en-US","title":"Update Required"},{"body":"Diese Version wird nicht mehr unterstützt. Bitte aktualisieren Sie die App.","locale":"de-CH","title":"Aktualisierung erforderlich"}],"release_date":"2025-12-05","support_guaranteed_until":"2026-08-31","update_type":"forced","version":"1.11.0"}]}"#);
+
+        let jwk = Jwk::from_bytes(
+            r#"{
+            "x": "cTZ_dcVbHvRaOcqyrh8XxISpzT0ZY0K4sc1i6g_MhwI",
+            "y": "Yknl0kJdq6lp36caafouXKx8HhVBJkcdqTNMW5qBcbY",
+            "crv": "P-256",
+            "kty": "EC",
+            "kid":"version-assertion-1"
+        }"#
+            .as_bytes(),
+        )
+        .unwrap();
+        let verifier = verifier_for_jwk(jwk).unwrap();
+        let p = detached_jws
+            .payload_with_verifier(
+                verifier.as_ref(),
+                &DefaultVerifier::new_with_known_crit(
+                    "JOSE".to_string(),
+                    vec![],
+                    vec!["b64".to_string()],
+                ),
+            )
+            .unwrap();
+        println!("{:?}", p);
+    }
 }
