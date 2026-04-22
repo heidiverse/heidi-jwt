@@ -30,6 +30,11 @@ pub struct JwkSet(
     pub JoseJwkSet,
 );
 
+pub enum RootStore {
+    Static(Vec<Vec<u8>>),
+    Any,
+}
+
 impl Default for JwkSet {
     fn default() -> Self {
         Self(JoseJwkSet::new())

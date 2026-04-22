@@ -10,7 +10,9 @@ josekit = { git = "https://github.com/ubamrein/josekit-rs.git", default-features
     "rustcrypto",
 ] }
 base64 = "0.22.1"
-x509-cert = "0.2.5"
-tracing = "0.1.41"
+tracing = "^0.1"
 itertools = "0.14.0"
 chrono = "0.4"
+heidi-x509 = { git = "https://github.com/heidiverse/heidi-x509.git" }
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -33,7 +33,7 @@ mod tests {
     use josekit::jws::{JwsHeader, alg::ecdsa::EcdsaJwsAlgorithm::Es256};
     use serde_json::json;
 
-    use crate::jwt::{Jwt, creator::JwtCreator};
+    use crate::jwt::{Jwt, creator::JwtCreator, verifier_for_header};
 
     #[test]
     fn test_float_or_int() {
@@ -99,6 +99,21 @@ mod tests {
                 .as_str()
                 .unwrap()
         );
-        let sig = Es256.signer_from_pem(privatekey).unwrap();
+        let signer = Es256.signer_from_pem(privatekey).unwrap();
+        signer.sign(b"some test message").unwrap();
+    }
+    #[test]
+    fn test_rsa_verification() {
+        let jwt = r#"eyJhbGciOiJQUzM4NCIsInR5cCIgOiAiSldTIiwia2lkIiA6ICJ6NGY1TXk4TEZuQ1FfMkhCTU9zR1V5QjE0WXI3cDJiMFhLbTd5QThYdndBIiwieDVjIiA6IFsiTUlJQ296Q0NBWXNDQmdHY1RZcDRIVEFOQmdrcWhraUc5dzBCQVFzRkFEQVZNUk13RVFZRFZRUUREQXB3YVdRdGFYTnpkV1Z5TUI0WERUSTJNREl4TVRFMk1qa3dObG9YRFRNMk1ESXhNVEUyTXpBME5sb3dGVEVUTUJFR0ExVUVBd3dLY0dsa0xXbHpjM1ZsY2pDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBT0lJWEc0NVFPclQ0R3F3cllvR3g5QzdQejBrVUZsVHcxWGQwRm05blBUYk9ESDZqRFBFYnRwYnlYa2ZmYmV4cVpuMzNXUDYxNzR2S0lTUFZVMlFIM0xSZCt6T1JpQXVIdEk4NDdBN0ZCNFg2YjhhK0ZQVGh0dWhGMHV3WmRoNjU1cVduNmNHcldQZ1NoQ0tEQmFkRllsSDZoT2xSNWhPdGQrR0NSVzJKb2pzbmxCZTF2ZmN3cFVpdjZ2bGtmY2dSaDY5c0MzMFltb25VdDZzT0Rlb2tMK20xdC8wcDZyaldzQkJKWHZKYUZWWjB0bG96OS91NVZ3NThBOWpRcFN1RS9iTk1TWE5jRVgxNjFwSnU3UEVHWDM4SHVlOTF5OTlEdnBRYnBPc2tnbW0vdzM3clFSdWF2ODVRRVozZC9iWWEvUEo4Tjc5MENlSFpPcjIwemlvem04Q0F3RUFBVEFOQmdrcWhraUc5dzBCQVFzRkFBT0NBUUVBclZtcWxzNTNYeEswS210Z29DUTlTeFRFUHVadG5jU0N1RTFtNnBNY3M4cHFpTGh5WXYyakk1bUkzWG94VGM3ZmYzYlhTL0xGVk5FWFdaU052K1lhV1RHWXAwMmloRk1OTVVUS0MvZzNCS2MwRkR6M3ZlYXQvSGVEMU15eW5kOENBLzhFZ1haTm5MOGtEUWh1Q2VnOEhKcnpJS1NHNzBxS21aYlRvcG5aOHNWV2VGM2RneG1ITjFDYTRIYUNOQ05xU3Z2eFF1bkF3UUV0T1FCSGdyamRIUzdPN0wwaEExUEQwcWRnc0hYb01ReE14V2RuOU9ZK2wxcEovRC9MQXB6MUxvOWR6dkgwM2tyelpiWXcxUGdVSm5VYzYzYXJTWUdMT1AxU2xWcVVNcVlPbVBnVXU2Q1Q1NFYyWEVETzZSYjJqa0diYUtLeWJSTGhXQnZDM1Z4WVhnPT0iXX0.eyJfc2QiOlsiQl9sN2FfUndQSGlUMHFTOTNqTUc0aGFCbGVjM013VXVrbGdnWm9jankyTSIsIkZTaEFudHhsc0NRV2FscFpldHhCSmFGSmp0akZ1UHpkb1VVdmZWdm4tcGsiLCJIUmJ3NWoxdE9GSnFSRmR2cm1VRnVQQkdSeWFBWmRhcXRXY29MWlEtRElVIiwiSjg4T2p0ZDQ4RlVrYno0emJoYjRmYUhQV3Vrd2k2ZGJ2bmNTOVNWYzI3MCIsIk13bmVrX04tSGgxNmxVT0Yxcm5XZkJiLVRzcm9LOUpZcEs4dmhaZ29oYnciLCJQb183NWh3MFVoZ2NJNV9VODRLNXEyeGxIQUl5a1hWbjU0MGtCeWJYcElZIiwiU29nbmtrenE5dFZUTV9CUDNSX2VXTG1Oazh5ZENjUGotU1hZcUFVdzhsbyIsIlYybjFVX3IzaGMyLUJIUDNCTmREY2dISjJuX2c0dmJpbXF2VDA0M2lVOXciLCJZeEZFQmdFU3QxN09pa0JxZXc2Yk14QVlMYXRmcW44RHpUekNhSU9VbjAwIiwiX05GN25leE8xSFRsOVdjVGY1YnFBOXkxc0VRMzF6Wnc0eE5nczBrbUlKayIsImNwZWFlYi1UTmZJLWpSS05UWVdjT3lValRtNERpcWg5UDNxaENNRWZSQU0iLCJpMTNkRngwWGx5a0FKNWw1YnJIYi1zY1VUb3hQNWxYWFRpREFvS19ES09RIiwiaTVkb3FwR1JVUkw4YnZGejVWTDZEbmQxY3RlcmZ5SnlJWWN2WG1ZS2JQOCIsImphZEUwUm5pN2syRHdqNlZvQ1dEZ042WTZoSTUzQWJfanBIUTVxQ0M2Q28iLCJqd0xrV2pNS3B2VHZPRVlSRTdEdTZidjJEcXdSSkN2RkJQLTd2UnBKY2ZNIiwiblF4RjFPbC0xSnZRdkxwWDg1Z1Iyd2g1WWxiUm9KMFRSTkdjT2ZLQzRoVSIsInBjeHJvZUI1U05za0NRdFkwZ2lOb0xKd3lsQmNwMUtneVQ4bVVXM1VwVFkiLCJxNEhFUGZXTTVrNWZZTFdhQzFvQmFDYkowUFRPMDVwOGhXcWlQZ3d3bWNJIiwid0liWXBCVHJBbXhhTlM0RUlOX3V1VmFmRmNTZkdidVFsMnpTZ0xmSHJROCJdLCJfc2RfYWxnIjoic2hhLTI1NiIsInZjdCI6InVybjpldWRpOnBpZDoxIiwiaXNzIjoiIiwiZXhwIjoxODA1OTY0NjQ2LCJjbmYiOnsiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoibnFjX19NdXVId3BxaG10V1VJUXFfcE9yVlc5MFc2UUxfeTc4bGZhNVAyYyIsInkiOiJIdWhDYm9LbXZ6MzJiMGVYZmVfRi1wSUtYQ2ljbGtYcHZlYzlLM0JENTFzIn19fQ.SS19zFKfcssytGJrZtizKOMU-Lbvgz2WEiw-k3W3pl3Edl0C2IhnSZWf0SGBE3N7aS4fwxtHHddYw-WbTTBd5emZvxld0Gq78u0jiuQqpggsJU1kFUbRTOmUAOT2jHyAZcg4nDGJO9ciyWWpXNTSjTpn1I4l08vjo0hqwrUzqDh0hoqy-tK-upyJp9r9AyoqzkoTeb9pI2koBZfOBdGrqaUFYPFkv3CVtTFgI8n225KQbxBOwgnINrkpUxGsCrvrwCscXKt0XequbVjAy2oHr1wSC-nkRg3Kcz2pTdiTGFGG4SO41GMqX4o02AWzf_OaGhK4aiBfIEbSrjTx_dzJkQ"#;
+        let jwt = Jwt::<serde_json::Value>::from_str(jwt).unwrap();
+        use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+        tracing_subscriber::registry()
+            .with(fmt::layer())
+            .with(EnvFilter::from_default_env())
+            .init();
+        let verifier = verifier_for_header(&jwt.header().unwrap()).unwrap();
+        let _ = jwt
+            .verify_signature_with_verifier(verifier.as_ref())
+            .unwrap();
     }
 }

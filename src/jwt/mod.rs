@@ -18,10 +18,14 @@ specific language governing permissions and limitations
 under the License.
  */
 
-use std::{fmt::Debug, marker::PhantomData, str::FromStr, time::SystemTime};
+use std::{fmt::Debug, marker::PhantomData, str::FromStr};
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::Utc;
+use heidi_x509::{
+    extract_public_key,
+    x509::{complete_simple_chain, is_self_signed_user_cert, verify_chain},
+};
 use josekit::{
     JoseHeader,
     jwk::Jwk,
@@ -30,7 +34,6 @@ use josekit::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 use tracing::instrument;
-use x509_cert::der::{Decode, Encode};
 
 use crate::models::{
     JwkSet,
@@ -144,15 +147,17 @@ where
             .write_to_transformer(&mut time_parts);
 
         if let Some(nbf) = time_parts.not_before
-            && nbf > time {
-                return Err(JwtError::Jws(JwsError::NotYetValid(
-                    "JWT not yet valid".to_string(),
-                )));
-            }
+            && nbf > time
+        {
+            return Err(JwtError::Jws(JwsError::NotYetValid(
+                "JWT not yet valid".to_string(),
+            )));
+        }
         if let Some(exp) = time_parts.expires_at
-            && exp < time {
-                return Err(JwtError::Jws(JwsError::Expired("JWT expired".to_string())));
-            }
+            && exp < time
+        {
+            return Err(JwtError::Jws(JwsError::Expired("JWT expired".to_string())));
+        }
         Ok(())
     }
     fn verify_body(&self, jwt: &Jwt<T>) -> Result<(), JwtError>;
@@ -237,7 +242,6 @@ where
             let sig_bytes = base64::prelude::BASE64_URL_SAFE_NO_PAD
                 .decode(&s.signature)
                 .map_err(|e| JwsError::EncodingError(format!("{e}")))?;
-            println!("alg: {}", verifier.algorithm().name());
 
             verifier
                 .verify(
@@ -253,7 +257,9 @@ where
         let header = josekit::jwt::decode_header(self.jwt_at(0))
             .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?;
         let Some(kid) = header.claim("kid").and_then(|a| a.as_str()) else {
-            return Err(JwtError::Jws(JwsError::InvalidHeader("Missing kid claim".to_string())));
+            return Err(JwtError::Jws(JwsError::InvalidHeader(
+                "Missing kid claim".to_string(),
+            )));
         };
         let Some(verifier) = jwk_set.verifier_for(kid) else {
             return Err(JwtError::Jws(JwsError::KeyNotFound(
@@ -292,8 +298,7 @@ impl<T: Serialize + DeserializeOwned> GeneralizedBody for Jwt<T> {
 impl<T: Serialize + DeserializeOwned> GeneralizedBody for Jwt<DetachedPayload<T>> {
     fn generalized_payload_unverified<'a>(&'a self) -> Unverified<'a, &'a serde_json::Value> {
         Unverified::new(
-            self
-                .payload
+            self.payload
                 .generalized_payload
                 .as_ref()
                 .unwrap_or(&josekit::Value::Null),
@@ -367,7 +372,9 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
         self.payload
             .payload
             .as_ref()
-            .ok_or(JwtError::Payload(PayloadError::InvalidPayload("No payload specified".to_string())))
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(
+                "No payload specified".to_string(),
+            )))
     }
     pub fn payload_with_verifier_from_header(
         &self,
@@ -377,17 +384,23 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
             self.header()?
                 .as_any()
                 .downcast_ref::<JwsHeader>()
-                .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader("invalid header".to_string())))?,
+                .ok_or_else(|| {
+                    JwtError::Jws(JwsError::InvalidHeader("invalid header".to_string()))
+                })?,
         )
         .ok_or_else(|| {
-            JwtError::Jws(JwsError::InvalidHeader("cannot extract signature verifier".to_string()))
+            JwtError::Jws(JwsError::InvalidHeader(
+                "cannot extract signature verifier".to_string(),
+            ))
         })?;
         self.verify_signature_with_verifier(signature_verifier.as_ref())?;
         self.verify(jwt_verifier)?;
         self.payload
             .payload
             .as_ref()
-            .ok_or(JwtError::Payload(PayloadError::InvalidPayload("No payload specified".to_string())))
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(
+                "No payload specified".to_string(),
+            )))
     }
     pub fn payload_with_verifier(
         &self,
@@ -399,7 +412,9 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
         self.payload
             .payload
             .as_ref()
-            .ok_or(JwtError::Payload(PayloadError::InvalidPayload("No payload specified".to_string())))
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(
+                "No payload specified".to_string(),
+            )))
     }
     pub fn payload_with_verifier_from_keyset(
         &self,
@@ -411,7 +426,9 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
         self.payload
             .payload
             .as_ref()
-            .ok_or(JwtError::Payload(PayloadError::InvalidPayload("No payload specified".to_string())))
+            .ok_or(JwtError::Payload(PayloadError::InvalidPayload(
+                "No payload specified".to_string(),
+            )))
     }
     pub fn payload_unverified<'a>(&'a self) -> Option<Unverified<'a, &'a T>> {
         self.payload.payload.as_ref().map(|a| Unverified::new(a))
@@ -463,10 +480,14 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
             self.header()?
                 .as_any()
                 .downcast_ref::<JwsHeader>()
-                .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader("invalid header".to_string())))?,
+                .ok_or_else(|| {
+                    JwtError::Jws(JwsError::InvalidHeader("invalid header".to_string()))
+                })?,
         )
         .ok_or_else(|| {
-            JwtError::Jws(JwsError::InvalidHeader("cannot extract signature verifier".to_string()))
+            JwtError::Jws(JwsError::InvalidHeader(
+                "cannot extract signature verifier".to_string(),
+            ))
         })?;
         self.verify_signature_with_verifier(signature_verifier.as_ref())?;
         self.verify(jwt_verifier)?;
@@ -737,63 +758,10 @@ pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
     None
 }
 
-//TODO: we should check CRL extensions and such
-pub fn check_x5c_chain(chain: &[Vec<u8>]) -> Result<(), JwtError> {
-    if chain.is_empty() {
-        return Err(X509Error::InvalidX5cChain("empty chain".to_string()).into());
-    }
-    let mut last_child: Option<x509_cert::Certificate> = None;
-    for c in chain {
-        let cert = x509_cert::Certificate::from_der(c)
-            .map_err(|e| X509Error::ParseError(format!("{e}")))?;
-        // check validity
-        let validity = cert.tbs_certificate.validity;
-        if validity.not_after.to_system_time() < SystemTime::now() {
-            return Err(X509Error::ExpiredCertificate(format!(
-                "certificate expired at {}",
-                validity.not_after
-            ))
-            .into());
-        }
-        if validity.not_before.to_system_time() > SystemTime::now() {
-            return Err(X509Error::ExpiredCertificate(format!(
-                "certificate not yet valid {}",
-                validity.not_after
-            ))
-            .into());
-        }
-        if let Some(last_child) = last_child {
-            let verifier = verifier_for_x5c(&cert)?;
-            let mut buf = vec![];
-            last_child.tbs_certificate.encode_to_vec(&mut buf).unwrap();
-            println!(
-                "{:?}",
-                verifier.verify(&buf, last_child.signature.raw_bytes())
-            );
-            if verifier
-                .verify(&buf, last_child.signature.raw_bytes())
-                .is_err()
-            {
-                return Err(JwsError::InvalidSignature(format!(
-                    "certificate has invalid signature {}",
-                    last_child.tbs_certificate.subject
-                ))
-                .into());
-            };
-        }
-        last_child = Some(cert);
-    }
-    Ok(())
-}
-
-pub fn verifier_for_x5c(x509: &x509_cert::Certificate) -> Result<Box<dyn JwsVerifier>, JwtError> {
-    verifier_for_der(
-        &x509
-            .tbs_certificate
-            .subject_public_key_info
-            .to_der()
-            .map_err(|e| X509Error::ParseError(format!("{e}")))?,
-    )
+pub fn verifier_for_x5c(
+    x509: heidi_x509::x509_parser::certificate::X509Certificate,
+) -> Result<Box<dyn JwsVerifier>, JwtError> {
+    verifier_for_der(&x509.subject_pki.subject_public_key.data)
 }
 pub fn verifier_for_der(der: &[u8]) -> Result<Box<dyn JwsVerifier>, JwtError> {
     //TODO: we should check the algorithm identifier in the certificate
@@ -837,13 +805,49 @@ pub fn verifier_for_der(der: &[u8]) -> Result<Box<dyn JwsVerifier>, JwtError> {
 }
 
 #[tracing::instrument]
-//TODO: verify the x509 certificate chain is valid
 pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
+    verifier_for_header_with_root_store(header, None, true)
+}
+
+#[tracing::instrument]
+pub fn verifier_for_header_with_root_store(
+    header: &JwsHeader,
+    root_store: Option<Vec<Vec<u8>>>,
+    check_chain: bool,
+) -> Option<Box<dyn JwsVerifier>> {
     let alg_name = header.algorithm().unwrap_or("ES256");
-    if let Some(x5c) = header.x509_certificate_chain() {
-        // Check if the x509 certificate chain is valid
-        println!("-#> {:?}", check_x5c_chain(x5c.as_ref()));
-        check_x5c_chain(x5c.as_ref()).ok()?;
+    if check_chain {
+        if let Some(mut x5c) = header.x509_certificate_chain() {
+            // Check if the x509 certificate chain is valid
+            // if there are no certificates in the chain, we can't verify
+            if x5c.is_empty() {
+                return None;
+            }
+            let x5c = if let Some(root_store) = root_store {
+                match complete_simple_chain(&mut x5c, &root_store) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("Cannot complete chain: {e:?}");
+                        return None;
+                    }
+                }
+                x5c
+            } else {
+                x5c
+            };
+            // if we have only one certificate, check for self signed user certificate
+            // NOTE: this means CA should be false!
+            if x5c.len() == 1 {
+                if !is_self_signed_user_cert(&x5c[0]) {
+                    return None;
+                }
+            } else {
+                // verify the certificate chain
+                if !verify_chain(x5c.clone()) {
+                    return None;
+                }
+            }
+        }
     }
     for alg in [
         josekit::jws::ES256,
@@ -852,10 +856,8 @@ pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
     ] {
         if alg.name() == alg_name {
             if let Some(x5c) = header.x509_certificate_chain() {
-                let x509 = x509_cert::Certificate::from_der(x5c.first()?).ok()?;
-                let verifier = alg
-                    .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
-                    .ok()?;
+                let der_key = extract_public_key(x5c.first()?).ok()?;
+                let verifier = alg.verifier_from_der(&der_key).ok()?;
                 return Some(Box::new(verifier));
             }
             if let Some(jwk) = header.jwk() {
@@ -870,13 +872,12 @@ pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
         josekit::jws::RS512,
     ] {
         if alg.name() == alg_name
-            && let Some(x5c) = header.x509_certificate_chain() {
-                let x509 = x509_cert::Certificate::from_der(x5c.first()?).ok()?;
-                let verifier = alg
-                    .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
-                    .ok()?;
-                return Some(Box::new(verifier));
-            }
+            && let Some(x5c) = header.x509_certificate_chain()
+        {
+            let der_key = extract_public_key(x5c.first()?).ok()?;
+            let verifier = alg.verifier_from_der(&der_key).ok()?;
+            return Some(Box::new(verifier));
+        }
         if let Some(jwk) = header.jwk() {
             let verifier = alg.verifier_from_jwk(&jwk).ok()?;
             return Some(Box::new(verifier));
@@ -888,13 +889,12 @@ pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
         josekit::jws::PS512,
     ] {
         if alg.name() == alg_name
-            && let Some(x5c) = header.x509_certificate_chain() {
-                let x509 = x509_cert::Certificate::from_der(x5c.first()?).ok()?;
-                let verifier = alg
-                    .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
-                    .ok()?;
-                return Some(Box::new(verifier));
-            }
+            && let Some(x5c) = header.x509_certificate_chain()
+        {
+            let der_key = extract_public_key(x5c.first()?).ok()?;
+            let verifier = alg.verifier_from_der(&der_key).ok()?;
+            return Some(Box::new(verifier));
+        }
         if let Some(jwk) = header.jwk() {
             let verifier = alg.verifier_from_jwk(&jwk).ok()?;
             return Some(Box::new(verifier));
@@ -903,13 +903,12 @@ pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
     {
         let alg = josekit::jws::EdDSA;
         if alg.name() == alg_name
-            && let Some(x5c) = header.x509_certificate_chain() {
-                let x509 = x509_cert::Certificate::from_der(x5c.first()?).ok()?;
-                let verifier = alg
-                    .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
-                    .ok()?;
-                return Some(Box::new(verifier));
-            }
+            && let Some(x5c) = header.x509_certificate_chain()
+        {
+            let der_key = extract_public_key(x5c.first()?).ok()?;
+            let verifier = alg.verifier_from_der(&der_key).ok()?;
+            return Some(Box::new(verifier));
+        }
         if let Some(jwk) = header.jwk() {
             let verifier = alg.verifier_from_jwk(&jwk).ok()?;
             return Some(Box::new(verifier));
