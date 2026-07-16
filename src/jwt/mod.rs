@@ -682,6 +682,15 @@ impl JwkSet {
                     return Some(Box::new(verifier));
                 }
             }
+            for alg in [
+                josekit::jws::MlDSA44,
+                josekit::jws::MlDSA65,
+                josekit::jws::MlDSA87,
+            ] {
+                if let Ok(verifier) = alg.verifier_from_jwk(jwk) {
+                    return Some(Box::new(verifier));
+                }
+            }
         }
         None
     }
@@ -720,6 +729,15 @@ pub fn verifier_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsVerifier>> {
             return Some(Box::new(verifier));
         }
     }
+    for alg in [
+        josekit::jws::MlDSA44,
+        josekit::jws::MlDSA65,
+        josekit::jws::MlDSA87,
+    ] {
+        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+            return Some(Box::new(verifier));
+        }
+    }
     None
 }
 pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
@@ -751,6 +769,15 @@ pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
         }
     }
     for alg in [josekit::jws::EdDSA] {
+        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+            return Some(Box::new(signer));
+        }
+    }
+    for alg in [
+        josekit::jws::MlDSA44,
+        josekit::jws::MlDSA65,
+        josekit::jws::MlDSA87,
+    ] {
         if let Ok(signer) = alg.signer_from_jwk(&jwk) {
             return Some(Box::new(signer));
         }
@@ -796,6 +823,16 @@ pub fn verifier_for_der(der: &[u8]) -> Result<Box<dyn JwsVerifier>, JwtError> {
         return Ok(Box::new(verifier));
     }
     for alg in [josekit::jws::EdDSA] {
+        let Ok(verifier) = alg.verifier_from_der(der) else {
+            continue;
+        };
+        return Ok(Box::new(verifier));
+    }
+    for alg in [
+        josekit::jws::MlDSA44,
+        josekit::jws::MlDSA65,
+        josekit::jws::MlDSA87,
+    ] {
         let Ok(verifier) = alg.verifier_from_der(der) else {
             continue;
         };
@@ -902,6 +939,23 @@ pub fn verifier_for_header_with_root_store(
     }
     {
         let alg = josekit::jws::EdDSA;
+        if alg.name() == alg_name
+            && let Some(x5c) = header.x509_certificate_chain()
+        {
+            let der_key = extract_public_key(x5c.first()?).ok()?;
+            let verifier = alg.verifier_from_der(&der_key).ok()?;
+            return Some(Box::new(verifier));
+        }
+        if let Some(jwk) = header.jwk() {
+            let verifier = alg.verifier_from_jwk(&jwk).ok()?;
+            return Some(Box::new(verifier));
+        }
+    }
+    for alg in [
+        josekit::jws::MlDSA44,
+        josekit::jws::MlDSA65,
+        josekit::jws::MlDSA87,
+    ] {
         if alg.name() == alg_name
             && let Some(x5c) = header.x509_certificate_chain()
         {
