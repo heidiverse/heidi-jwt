@@ -923,28 +923,13 @@ version = "0.1.2"
 dependencies = [
  "base64",
  "chrono",
- "heidi-x509",
  "itertools",
  "josekit",
+ "kapun-x509",
  "serde",
  "serde_json",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "heidi-x509"
-version = "0.1.0"
-source = "git+https://github.com/heidiverse/heidi-x509.git#89bba6f5306e895b60d0a8da5c8a145d11b02590"
-dependencies = [
- "josekit",
- "oid-registry",
- "rsa",
- "sha1",
- "tracing",
- "ureq",
- "whitespace-sifter",
- "x509-parser",
 ]
 
 [[package]]
@@ -1142,6 +1127,21 @@ dependencies = [
  "once_cell",
  "sha2 0.10.9",
  "signature 2.2.0",
+]
+
+[[package]]
+name = "kapun-x509"
+version = "0.1.0"
+source = "git+https://github.com/heidiverse/kapun-sdk.git#7046ed793d2483ef973d58bc8ff03fb094cda151"
+dependencies = [
+ "josekit",
+ "oid-registry",
+ "rsa",
+ "sha1",
+ "tracing",
+ "ureq",
+ "whitespace-sifter",
+ "x509-parser",
 ]
 
 [[package]]
