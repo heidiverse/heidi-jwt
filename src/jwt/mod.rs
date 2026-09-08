@@ -22,14 +22,14 @@ use std::{fmt::Debug, marker::PhantomData, str::FromStr};
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::Utc;
-use heidi_x509::{
-    extract_public_key,
-    x509::{complete_simple_chain, is_self_signed_user_cert, verify_chain},
-};
 use josekit::{
     JoseHeader,
     jwk::Jwk,
     jws::{JwsHeader, JwsSigner, JwsVerifier},
+};
+use kapun_x509::{
+    extract_public_key,
+    x509::{complete_simple_chain, is_self_signed_user_cert, verify_chain},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
@@ -786,7 +786,7 @@ pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
 }
 
 pub fn verifier_for_x5c(
-    x509: heidi_x509::x509_parser::certificate::X509Certificate,
+    x509: kapun_x509::x509_parser::certificate::X509Certificate,
 ) -> Result<Box<dyn JwsVerifier>, JwtError> {
     verifier_for_der(&x509.subject_pki.subject_public_key.data)
 }
