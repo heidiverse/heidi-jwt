@@ -25,7 +25,7 @@ use chrono::Utc;
 use josekit::{
     JoseHeader,
     jwk::Jwk,
-    jws::{JwsHeader, JwsSigner, JwsVerifier},
+    jws::{JwsHeader, JwsSigner, JwsVerifier, alg::JosekitCryptoProvider},
 };
 use kapun_x509::{
     extract_public_key,
@@ -861,7 +861,7 @@ pub fn verifier_for_header_with_root_store(
                 return None;
             }
             let x5c = if let Some(root_store) = root_store {
-                match complete_simple_chain(&mut x5c, &root_store) {
+                match complete_simple_chain::<JosekitCryptoProvider>(&mut x5c, &root_store) {
                     Ok(_) => {}
                     Err(e) => {
                         tracing::error!("Cannot complete chain: {e:?}");
@@ -875,12 +875,12 @@ pub fn verifier_for_header_with_root_store(
             // if we have only one certificate, check for self signed user certificate
             // NOTE: this means CA should be false!
             if x5c.len() == 1 {
-                if !is_self_signed_user_cert(&x5c[0]) {
+                if !is_self_signed_user_cert::<_, JosekitCryptoProvider>(&x5c[0]) {
                     return None;
                 }
             } else {
                 // verify the certificate chain
-                if !verify_chain(x5c.clone()) {
+                if !verify_chain::<JosekitCryptoProvider>(x5c.clone()) {
                     return None;
                 }
             }
