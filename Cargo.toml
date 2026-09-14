@@ -15,6 +15,6 @@ base64 = "0.22.1"
 tracing = "^0.1"
 itertools = "0.14.0"
 chrono = "0.4"
-kapun-x509 = { git = "https://github.com/heidiverse/kapun-sdk.git" }
+kapun-x509 = { git = "https://github.com/KapunSDK/kapun-sdk.git" }
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
