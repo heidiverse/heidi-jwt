@@ -120,7 +120,6 @@ mod tests {
         )
         .unwrap();
 
-        println!("{jwt}");
         let parsed_jwt = Jwt::<TestStruct>::from_str(&jwt).unwrap();
         let verifier = Es256
             .verifier_from_der(signer_key.to_der_public_key())

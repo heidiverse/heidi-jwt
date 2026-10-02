@@ -1107,7 +1107,7 @@ mod tests {
         )
         .unwrap();
         let verifier = verifier_for_jwk(jwk).unwrap();
-        let p = detached_jws
+        let _payload = detached_jws
             .payload_with_verifier(
                 verifier.as_ref(),
                 &DefaultVerifier::new_with_known_crit(
@@ -1117,6 +1117,5 @@ mod tests {
                 ),
             )
             .unwrap();
-        println!("{:?}", p);
     }
 }
