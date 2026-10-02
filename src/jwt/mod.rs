@@ -270,7 +270,10 @@ where
             let sig_bytes = base64::prelude::BASE64_URL_SAFE_NO_PAD
                 .decode(&s.signature)
                 .map_err(|e| JwsError::EncodingError(format!("{e}")))?;
-            println!("alg: {}", verifier.algorithm().name());
+            tracing::debug!(
+                algorithm = verifier.algorithm().name(),
+                "verifying JWT signature"
+            );
 
             verifier
                 .verify(
@@ -1046,9 +1049,46 @@ pub fn eddsa_verifier_from_bytes(bytes: &[u8], crv: &str) -> Option<Box<dyn JwsV
 
 #[cfg(test)]
 mod tests {
-    use josekit::jwk::Jwk;
+    use std::str::FromStr;
 
-    use crate::jwt::{DetachedPayload, Jwt, verifier::DefaultVerifier, verifier_for_jwk};
+    use josekit::{
+        jwk::{Jwk, JwkSet as JoseJwkSet, KeyPair},
+        jws::{JwsHeader, alg::ecdsa::EcdsaJwsAlgorithm::Es256},
+    };
+
+    use crate::{
+        jwt::{
+            DetachedPayload, Jwt, creator::JwtCreator, verifier::DefaultVerifier, verifier_for_jwk,
+        },
+        models::JwkSet,
+    };
+
+    #[test]
+    fn test_verify_signature_with_jwk_set() {
+        let key_pair = Es256.generate_key_pair().unwrap();
+        let signer = Es256.signer_from_jwk(&key_pair.to_jwk_key_pair()).unwrap();
+        let mut public_jwk = key_pair.to_jwk_public_key();
+        public_jwk.set_key_id("test-key");
+
+        let mut jose_jwk_set = JoseJwkSet::new();
+        jose_jwk_set.push_key(public_jwk);
+        let jwk_set = JwkSet(jose_jwk_set);
+
+        let mut header = JwsHeader::new();
+        header.set_algorithm(Es256.name());
+        header.set_key_id("test-key");
+        let jwt = serde_json::json!({"sub": "test"})
+            .create_jwt(
+                &header,
+                None,
+                chrono::Duration::minutes(5),
+                &Box::new(signer),
+            )
+            .unwrap();
+
+        let jwt = Jwt::<serde_json::Value>::from_str(&jwt).unwrap();
+        assert!(jwt.verify_signature(&jwk_set).is_ok());
+    }
 
     #[test]
     fn test_detached_jws() {
@@ -1067,7 +1107,7 @@ mod tests {
         )
         .unwrap();
         let verifier = verifier_for_jwk(jwk).unwrap();
-        let p = detached_jws
+        let _payload = detached_jws
             .payload_with_verifier(
                 verifier.as_ref(),
                 &DefaultVerifier::new_with_known_crit(
@@ -1077,6 +1117,5 @@ mod tests {
                 ),
             )
             .unwrap();
-        println!("{:?}", p);
     }
 }

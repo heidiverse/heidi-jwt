@@ -73,14 +73,14 @@ mod tests {
     fn test_payload_parse() {
         let jwt_str = "eyJhbGciOiJFUzI1NiIsImp3ayI6eyJjcnYiOiJQLTI1NiIsImt0eSI6IkVDIiwieCI6ImlVbE96RF9HOV9tODkwNmpfMTk1WXIzSXBlNlhtWS1Ld2dicmhzTVI4M28iLCJ5IjoiYjU1TEQ5NFVhVVh3VUhxMGN1QnJyMERQRk5EZUFzRTQ5UzhEVjJlaVBibyJ9LCJ0eXAiOiJrYitqd3QifQ.eyJpYXQiOjE3NjkwNzg4NDQuMzA0MDY2LCJhdWQiOiJjaC5hZG1pbi5zd2l5dWNoZWNrIiwic2RfaGFzaCI6IkNGWF9paUxBNjM4TUlDUW9veXBOdVJFeHBEczJjTXVac2luOXFpbDhqSHcifQ.FYQzJ1vmFFNF9e3YoBSSh3lTxDY-7gBlZvbX8SHKmW6KB1LkoJtThIxALrdcwkvtZIzmQHnXK9Afv1hVsOZHEQ";
         let t = Jwt::<serde_json::Value>::from_str(jwt_str).unwrap();
-        println!(
-            "{}",
+        assert_eq!(
             t.payload_unverified()
                 .insecure()
                 .get("iat")
                 .unwrap()
                 .as_f64()
-                .unwrap()
+                .unwrap(),
+            1769078844.304066
         );
     }
     #[test]
@@ -91,13 +91,13 @@ mod tests {
         1nD5vNU0ddhsMqLfzg==
         -----END EC PRIVATE KEY-----"#;
         let s = Es256.key_pair_from_pem(privatekey).unwrap();
-        println!(
-            "{}",
-            s.to_jwk_private_key()
+        assert!(
+            !s.to_jwk_private_key()
                 .parameter("d")
                 .unwrap()
                 .as_str()
                 .unwrap()
+                .is_empty()
         );
         let signer = Es256.signer_from_pem(privatekey).unwrap();
         signer.sign(b"some test message").unwrap();
