@@ -62,12 +62,22 @@ impl PartialOrd<i64> for FloatOrInt {
 }
 
 impl FloatOrInt {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "TODO(tha): Avoid precision loss by investigating use cases"
+    )]
+    #[must_use]
     pub fn as_f64(&self) -> f64 {
         match self {
             FloatOrInt::Float(f) => *f,
             FloatOrInt::Int(i) => *i as f64,
         }
     }
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "TODO(tha): Avoid possible truncation by investigating use cases"
+    )]
+    #[must_use]
     pub fn as_i64(&self) -> i64 {
         match self {
             FloatOrInt::Float(f) => *f as i64,
@@ -100,7 +110,7 @@ impl<T> JwtBody for T where T: Serialize + DeserializeOwned {}
 impl<T> JwtBody for DetachedPayload<T> where T: Serialize + DeserializeOwned {}
 
 pub trait GeneralizedBody {
-    fn generalized_payload_unverified<'a>(&'a self) -> Unverified<'a, &'a serde_json::Value>;
+    fn generalized_payload_unverified(&self) -> Unverified<'_, &serde_json::Value>;
     fn jwt_at(&self, index: usize) -> String;
 }
 
@@ -119,19 +129,20 @@ where
     }
     fn typ(&self, jwt: &Jwt<T>) -> Option<String> {
         let jws_header = self.jws_header(jwt).ok()?;
-        jws_header.token_type().map(|s| s.to_string())
+        jws_header
+            .token_type()
+            .map(std::string::ToString::to_string)
     }
     fn assert_type(&self, jwt: &Jwt<T>, expected_type: &str) -> Result<(), JwtError> {
         let ty = self.typ(jwt).ok_or(JwtError::Jws(JwsError::TypeError(
             "Invalid header type".to_string(),
         )))?;
-        if ty != expected_type {
-            Err(JwtError::Jws(JwsError::TypeError(format!(
-                "Expected type {}, got {}",
-                expected_type, ty
-            ))))
-        } else {
+        if ty == expected_type {
             Ok(())
+        } else {
+            Err(JwtError::Jws(JwsError::TypeError(format!(
+                "Expected type {expected_type}, got {ty}"
+            ))))
         }
     }
     fn verify_header(&self, jwt: &Jwt<T>) -> Result<(), JwtError>;
@@ -165,6 +176,8 @@ where
 
 pub trait Jwtable: Serialize + DeserializeOwned + Debug {}
 
+type KeyIdAndVerifier = (String, Box<dyn JwsVerifier>);
+
 #[derive(Clone)]
 pub struct Jwt<T> {
     payload: T,
@@ -176,6 +189,7 @@ impl<T: Serialize + DeserializeOwned> Debug for Jwt<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Jwt")
             .field("payload", &serde_json::to_string(&self.payload))
+            .field("generalized_payload", &self.generalized_payload)
             .field("original_payload", &self.original_payload)
             .field("signatures", &self.signatures)
             .finish()
@@ -228,13 +242,11 @@ where
     ) -> Result<(), JwtError> {
         let header = josekit::jwt::decode_header(self.jwt_at(0))
             .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?;
-        if verifier.algorithm().name()
-            != header
-                .as_any()
-                .downcast_ref::<JwsHeader>()
-                .unwrap()
-                .algorithm()
-                .unwrap()
+        if header
+            .as_any()
+            .downcast_ref::<JwsHeader>()
+            .and_then(|header| header.algorithm())
+            .is_none_or(|algorithm| algorithm != verifier.algorithm().name())
         {
             return Err(JwsError::InvalidHeader("algorithm not matching".to_string()).into());
         }
@@ -287,7 +299,7 @@ where
 }
 
 impl<T: Serialize + DeserializeOwned> GeneralizedBody for Jwt<T> {
-    fn generalized_payload_unverified<'a>(&'a self) -> Unverified<'a, &'a serde_json::Value> {
+    fn generalized_payload_unverified(&self) -> Unverified<'_, &serde_json::Value> {
         Unverified::new(&self.generalized_payload)
     }
     fn jwt_at(&self, index: usize) -> String {
@@ -299,7 +311,7 @@ impl<T: Serialize + DeserializeOwned> GeneralizedBody for Jwt<T> {
     }
 }
 impl<T: Serialize + DeserializeOwned> GeneralizedBody for Jwt<DetachedPayload<T>> {
-    fn generalized_payload_unverified<'a>(&'a self) -> Unverified<'a, &'a serde_json::Value> {
+    fn generalized_payload_unverified(&self) -> Unverified<'_, &serde_json::Value> {
         Unverified::new(
             self.payload
                 .generalized_payload
@@ -336,9 +348,7 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
             self.generalized_payload = gp.clone();
         }
     }
-    pub fn verifier_from_embedded_jwk(
-        &self,
-    ) -> Result<Vec<(String, Box<dyn JwsVerifier>)>, JwtError> {
+    pub fn verifier_from_embedded_jwk(&self) -> Result<Vec<KeyIdAndVerifier>, JwtError> {
         let Some(jwks) = self
             .payload
             .generalized_payload
@@ -357,7 +367,7 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
                 continue;
             };
             let key_id = jwk.key_id().unwrap_or_default().to_string();
-            let Some(verifier) = verifier_for_jwk(jwk) else {
+            let Some(verifier) = verifier_for_jwk(&jwk) else {
                 continue;
             };
             verifiers.push((key_id, verifier));
@@ -433,15 +443,13 @@ impl<T: Serialize + DeserializeOwned> Jwt<DetachedPayload<T>> {
                 "No payload specified".to_string(),
             )))
     }
-    pub fn payload_unverified<'a>(&'a self) -> Option<Unverified<'a, &'a T>> {
+    pub fn payload_unverified(&self) -> Option<Unverified<'_, &T>> {
         self.payload.payload.as_ref().map(|a| Unverified::new(a))
     }
 }
 
 impl<T: Serialize + DeserializeOwned> Jwt<T> {
-    pub fn verifier_from_embedded_jwk(
-        &self,
-    ) -> Result<Vec<(String, Box<dyn JwsVerifier>)>, JwtError> {
+    pub fn verifier_from_embedded_jwk(&self) -> Result<Vec<KeyIdAndVerifier>, JwtError> {
         let Some(jwks) = self
             .generalized_payload
             .get("jwks")
@@ -458,7 +466,7 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
                 continue;
             };
             let key_id = jwk.key_id().unwrap_or_default().to_string();
-            let Some(verifier) = verifier_for_jwk(jwk) else {
+            let Some(verifier) = verifier_for_jwk(&jwk) else {
                 continue;
             };
             verifiers.push((key_id, verifier));
@@ -515,7 +523,7 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
         Ok(&self.payload)
     }
 
-    pub fn payload_unverified<'a>(&'a self) -> Unverified<'a, &'a T> {
+    pub fn payload_unverified(&self) -> Unverified<'_, &T> {
         let p = &self.payload;
         Unverified::new(p)
     }
@@ -531,6 +539,7 @@ impl<'a, T> Unverified<'a, &'a T> {
             _data: PhantomData,
         }
     }
+    #[must_use]
     pub fn insecure(&self) -> &T {
         self.payload
     }
@@ -542,6 +551,7 @@ pub struct DetachedPayload<T> {
     original_payload: String,
 }
 impl<T: Serialize + DeserializeOwned> DetachedPayload<T> {
+    #[must_use]
     pub fn new(payload: &str) -> Self {
         let p = serde_json::from_str(payload).ok();
         let generalized_payload = serde_json::from_str(payload).ok();
@@ -551,6 +561,7 @@ impl<T: Serialize + DeserializeOwned> DetachedPayload<T> {
             original_payload: payload.to_string(),
         }
     }
+    #[must_use]
     pub fn new_with_encoded_payload(encoded_payload: &str, payload: &str) -> Self {
         let p = serde_json::from_str(payload).ok();
         let generalized_payload = serde_json::from_str(payload).ok();
@@ -579,15 +590,13 @@ where
             .decode(payload)
             .map_err(|e| {
                 JwtError::Payload(PayloadError::InvalidPayload(format!(
-                    "Base64 decode failed: {}",
-                    e
+                    "Base64 decode failed: {e}"
                 )))
             })?;
 
         let payload = std::str::from_utf8(&decoded_bytes).map_err(|e| {
             JwtError::Payload(PayloadError::InvalidPayload(format!(
-                "UTF-8 decode failed: {}",
-                e
+                "UTF-8 decode failed: {e}"
             )))
         })?;
         let payload = DetachedPayload::new(payload);
@@ -622,15 +631,13 @@ where
             .decode(payload)
             .map_err(|e| {
                 JwtError::Payload(PayloadError::InvalidPayload(format!(
-                    "Base64 decode failed: {}",
-                    e
+                    "Base64 decode failed: {e}"
                 )))
             })?;
 
         let payload = std::str::from_utf8(&decoded_bytes).map_err(|e| {
             JwtError::Payload(PayloadError::InvalidPayload(format!(
-                "UTF-8 decode failed: {}",
-                e
+                "UTF-8 decode failed: {e}"
             )))
         })?;
 
@@ -650,6 +657,7 @@ where
 }
 
 impl JwkSet {
+    #[must_use]
     pub fn verifier_for(&self, key_id: &str) -> Option<Box<dyn JwsVerifier>> {
         let jwks = self.0.get(key_id);
         for jwk in jwks {
@@ -680,6 +688,10 @@ impl JwkSet {
                     return Some(Box::new(verifier));
                 }
             }
+            #[expect(
+                clippy::single_element_loop,
+                reason = "There might be more algorithms to come"
+            )]
             for alg in [josekit::jws::EdDSA] {
                 if let Ok(verifier) = alg.verifier_from_jwk(jwk) {
                     return Some(Box::new(verifier));
@@ -699,13 +711,14 @@ impl JwkSet {
     }
 }
 
-pub fn verifier_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsVerifier>> {
+#[must_use]
+pub fn verifier_for_jwk(jwk: &Jwk) -> Option<Box<dyn JwsVerifier>> {
     for alg in [
         josekit::jws::ES256,
         josekit::jws::ES384,
         josekit::jws::ES512,
     ] {
-        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+        if let Ok(verifier) = alg.verifier_from_jwk(jwk) {
             return Some(Box::new(verifier));
         }
     }
@@ -714,7 +727,7 @@ pub fn verifier_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsVerifier>> {
         josekit::jws::RS384,
         josekit::jws::RS512,
     ] {
-        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+        if let Ok(verifier) = alg.verifier_from_jwk(jwk) {
             return Some(Box::new(verifier));
         }
     }
@@ -723,12 +736,16 @@ pub fn verifier_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsVerifier>> {
         josekit::jws::PS384,
         josekit::jws::PS512,
     ] {
-        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+        if let Ok(verifier) = alg.verifier_from_jwk(jwk) {
             return Some(Box::new(verifier));
         }
     }
+    #[expect(
+        clippy::single_element_loop,
+        reason = "There might be more algorithms to come"
+    )]
     for alg in [josekit::jws::EdDSA] {
-        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+        if let Ok(verifier) = alg.verifier_from_jwk(jwk) {
             return Some(Box::new(verifier));
         }
     }
@@ -737,19 +754,20 @@ pub fn verifier_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsVerifier>> {
         josekit::jws::MlDSA65,
         josekit::jws::MlDSA87,
     ] {
-        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+        if let Ok(verifier) = alg.verifier_from_jwk(jwk) {
             return Some(Box::new(verifier));
         }
     }
     None
 }
-pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
+#[must_use]
+pub fn signer_for_jwk(jwk: &Jwk) -> Option<Box<dyn JwsSigner>> {
     for alg in [
         josekit::jws::ES256,
         josekit::jws::ES384,
         josekit::jws::ES512,
     ] {
-        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+        if let Ok(signer) = alg.signer_from_jwk(jwk) {
             return Some(Box::new(signer));
         }
     }
@@ -758,7 +776,7 @@ pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
         josekit::jws::RS384,
         josekit::jws::RS512,
     ] {
-        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+        if let Ok(signer) = alg.signer_from_jwk(jwk) {
             return Some(Box::new(signer));
         }
     }
@@ -767,12 +785,16 @@ pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
         josekit::jws::PS384,
         josekit::jws::PS512,
     ] {
-        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+        if let Ok(signer) = alg.signer_from_jwk(jwk) {
             return Some(Box::new(signer));
         }
     }
+    #[expect(
+        clippy::single_element_loop,
+        reason = "There might be more algorithms to come"
+    )]
     for alg in [josekit::jws::EdDSA] {
-        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+        if let Ok(signer) = alg.signer_from_jwk(jwk) {
             return Some(Box::new(signer));
         }
     }
@@ -781,7 +803,7 @@ pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
         josekit::jws::MlDSA65,
         josekit::jws::MlDSA87,
     ] {
-        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+        if let Ok(signer) = alg.signer_from_jwk(jwk) {
             return Some(Box::new(signer));
         }
     }
@@ -789,7 +811,7 @@ pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
 }
 
 pub fn verifier_for_x5c(
-    x509: kapun_x509::x509_parser::certificate::X509Certificate,
+    x509: &kapun_x509::x509_parser::certificate::X509Certificate,
 ) -> Result<Box<dyn JwsVerifier>, JwtError> {
     verifier_for_der(&x509.subject_pki.subject_public_key.data)
 }
@@ -800,46 +822,42 @@ pub fn verifier_for_der(der: &[u8]) -> Result<Box<dyn JwsVerifier>, JwtError> {
         josekit::jws::ES384,
         josekit::jws::ES512,
     ] {
-        let Ok(verifier) = alg.verifier_from_der(der) else {
-            continue;
-        };
-        return Ok(Box::new(verifier));
+        if let Ok(verifier) = alg.verifier_from_der(der) {
+            return Ok(Box::new(verifier));
+        }
     }
     for alg in [
         josekit::jws::RS256,
         josekit::jws::RS384,
         josekit::jws::RS512,
     ] {
-        let Ok(verifier) = alg.verifier_from_der(der) else {
-            continue;
-        };
-        return Ok(Box::new(verifier));
+        if let Ok(verifier) = alg.verifier_from_der(der) {
+            return Ok(Box::new(verifier));
+        }
     }
     for alg in [
         josekit::jws::PS256,
         josekit::jws::PS384,
         josekit::jws::PS512,
     ] {
-        let Ok(verifier) = alg.verifier_from_der(der) else {
-            continue;
-        };
-        return Ok(Box::new(verifier));
+        if let Ok(verifier) = alg.verifier_from_der(der) {
+            return Ok(Box::new(verifier));
+        }
     }
+    #[expect(clippy::single_element_loop, reason = "There might be more algorithms")]
     for alg in [josekit::jws::EdDSA] {
-        let Ok(verifier) = alg.verifier_from_der(der) else {
-            continue;
-        };
-        return Ok(Box::new(verifier));
+        if let Ok(verifier) = alg.verifier_from_der(der) {
+            return Ok(Box::new(verifier));
+        }
     }
     for alg in [
         josekit::jws::MlDSA44,
         josekit::jws::MlDSA65,
         josekit::jws::MlDSA87,
     ] {
-        let Ok(verifier) = alg.verifier_from_der(der) else {
-            continue;
-        };
-        return Ok(Box::new(verifier));
+        if let Ok(verifier) = alg.verifier_from_der(der) {
+            return Ok(Box::new(verifier));
+        }
     }
     Err(X509Error::InvalidAlgorithm("Invalid Algorithm".to_string()).into())
 }
@@ -856,36 +874,34 @@ pub fn verifier_for_header_with_root_store(
     check_chain: bool,
 ) -> Option<Box<dyn JwsVerifier>> {
     let alg_name = header.algorithm().unwrap_or("ES256");
-    if check_chain {
-        if let Some(mut x5c) = header.x509_certificate_chain() {
-            // Check if the x509 certificate chain is valid
-            // if there are no certificates in the chain, we can't verify
-            if x5c.is_empty() {
+    if check_chain && let Some(mut x5c) = header.x509_certificate_chain() {
+        // Check if the x509 certificate chain is valid
+        // if there are no certificates in the chain, we can't verify
+        if x5c.is_empty() {
+            return None;
+        }
+        let x5c = if let Some(root_store) = root_store {
+            match complete_simple_chain::<JosekitCryptoProvider>(&mut x5c, &root_store) {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::error!("Cannot complete chain: {e:?}");
+                    return None;
+                }
+            }
+            x5c
+        } else {
+            x5c
+        };
+        // if we have only one certificate, check for self signed user certificate
+        // NOTE: this means CA should be false!
+        if x5c.len() == 1 {
+            if !is_self_signed_user_cert::<_, JosekitCryptoProvider>(&x5c[0]) {
                 return None;
             }
-            let x5c = if let Some(root_store) = root_store {
-                match complete_simple_chain::<JosekitCryptoProvider>(&mut x5c, &root_store) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::error!("Cannot complete chain: {e:?}");
-                        return None;
-                    }
-                }
-                x5c
-            } else {
-                x5c
-            };
-            // if we have only one certificate, check for self signed user certificate
-            // NOTE: this means CA should be false!
-            if x5c.len() == 1 {
-                if !is_self_signed_user_cert::<_, JosekitCryptoProvider>(&x5c[0]) {
-                    return None;
-                }
-            } else {
-                // verify the certificate chain
-                if !verify_chain::<JosekitCryptoProvider>(x5c.clone()) {
-                    return None;
-                }
+        } else {
+            // verify the certificate chain
+            if !verify_chain::<JosekitCryptoProvider>(x5c.clone()) {
+                return None;
             }
         }
     }
@@ -975,6 +991,7 @@ pub fn verifier_for_header_with_root_store(
 }
 
 /// Get a verifier from a SEC1 encoded EC key (no point compression!).
+#[must_use]
 pub fn ec_verifier_from_sec1(sec1_bytes: &[u8], crv: &str) -> Option<Box<dyn JwsVerifier>> {
     if sec1_bytes.len() != 65 {
         return None;
@@ -1000,6 +1017,7 @@ pub fn ec_verifier_from_sec1(sec1_bytes: &[u8], crv: &str) -> Option<Box<dyn Jws
 }
 
 /// Get a verifier from an encoded HMAC key.
+#[must_use]
 pub fn hmac_verifier_from_bytes(bytes: &[u8], alg: &str) -> Option<Box<dyn JwsVerifier>> {
     match alg {
         "HS256" => Some(Box::new(
@@ -1016,6 +1034,7 @@ pub fn hmac_verifier_from_bytes(bytes: &[u8], alg: &str) -> Option<Box<dyn JwsVe
 }
 
 /// Get a verifier from an encoded RSA key.
+#[must_use]
 pub fn rsa_verifier_from_der(der: &[u8], alg: &str) -> Option<Box<dyn JwsVerifier>> {
     match alg {
         "RS256" => Some(Box::new(josekit::jws::RS256.verifier_from_der(der).ok()?)),
@@ -1028,7 +1047,8 @@ pub fn rsa_verifier_from_der(der: &[u8], alg: &str) -> Option<Box<dyn JwsVerifie
     }
 }
 
-/// Get a verifier from an encoded EdDSA key.
+/// Get a verifier from an encoded `EdDSA` key.
+#[must_use]
 pub fn eddsa_verifier_from_bytes(bytes: &[u8], crv: &str) -> Option<Box<dyn JwsVerifier>> {
     if bytes.len() != 32 {
         return None;
@@ -1106,7 +1126,7 @@ mod tests {
             .as_bytes(),
         )
         .unwrap();
-        let verifier = verifier_for_jwk(jwk).unwrap();
+        let verifier = verifier_for_jwk(&jwk).unwrap();
         let _payload = detached_jws
             .payload_with_verifier(
                 verifier.as_ref(),

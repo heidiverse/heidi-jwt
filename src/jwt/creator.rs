@@ -1,4 +1,3 @@
-
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
 use josekit::{
@@ -69,7 +68,7 @@ where
             JwtError::Payload(PayloadError::InvalidPayload(format!("Serde-Error: {e}")))
         })?);
         let header = BASE64_URL_SAFE_NO_PAD.encode(header.to_string());
-        let mut jwt = format!("{}.{}", header, payload);
+        let mut jwt = format!("{header}.{payload}");
         let signature = BASE64_URL_SAFE_NO_PAD.encode(signer.sign(jwt.as_bytes())?);
         jwt.push('.');
         jwt.push_str(&signature);
@@ -95,6 +94,12 @@ mod tests {
 
     #[test]
     fn test_create_jwt() {
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            id: String,
+            name: String,
+        }
+
         let mut header = JwsHeader::new();
         header.set_algorithm("ES256");
         header.set_token_type("example+jwt");
@@ -102,11 +107,6 @@ mod tests {
         let signer = Es256
             .signer_from_der(signer_key.to_der_private_key())
             .unwrap();
-        #[derive(Serialize, Deserialize, Debug, PartialEq)]
-        struct TestStruct {
-            id: String,
-            name: String,
-        }
 
         let jwt = TestStruct {
             id: "1".to_string(),

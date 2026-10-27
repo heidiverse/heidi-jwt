@@ -18,3 +18,10 @@ chrono = "0.4"
 kapun-x509 = { git = "https://github.com/KapunSDK/kapun-sdk.git", default-features = false }
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.clippy]
+# Pedantic
+pedantic = "warn"
+too_many_lines = { level = "allow", priority = 1 }
+similar_names = { level = "allow", priority = 1 }
+

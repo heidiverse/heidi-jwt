@@ -19,6 +19,7 @@ pub enum ClaimValidator {
 }
 
 impl DefaultVerifier {
+    #[must_use]
     pub fn new(jwt_type: String, required_claims: Vec<ClaimValidator>) -> Self {
         DefaultVerifier {
             jwt_type,
@@ -26,6 +27,7 @@ impl DefaultVerifier {
             known_crit: Vec::new(),
         }
     }
+    #[must_use]
     pub fn new_with_known_crit(
         jwt_type: String,
         required_claims: Vec<ClaimValidator>,
@@ -47,8 +49,7 @@ impl<T: Serialize + DeserializeOwned> JwtVerifier<T> for DefaultVerifier {
             for c in crit {
                 if !self.known_crit.contains(&c.to_string()) {
                     return Err(JwtError::Jws(JwsError::InvalidHeader(format!(
-                        "unknown crit: {:?}",
-                        c
+                        "unknown crit: {c:?}"
                     ))));
                 }
             }
@@ -69,20 +70,20 @@ impl<T: Serialize + DeserializeOwned> JwtVerifier<T> for DefaultVerifier {
                 ClaimValidator::Presence(c) => {
                     if val.get(c).is_none() {
                         return Err(JwtError::Payload(PayloadError::MissingRequiredProperty(
-                            format!("missing required claim: {}", c),
+                            format!("missing required claim: {c}"),
                         )));
                     }
                 }
                 ClaimValidator::Value(claim, value) => {
                     let Some(val) = val.get(claim) else {
                         return Err(JwtError::Payload(PayloadError::MissingRequiredProperty(
-                            format!("missing required claim: {}", claim),
+                            format!("missing required claim: {claim}"),
                         )));
                     };
                     let value: serde_json::Value = (value.to_owned()).into();
                     if val != &value {
                         return Err(JwtError::Payload(PayloadError::MissingRequiredProperty(
-                            format!("invalid value for claim: {}", claim),
+                            format!("invalid value for claim: {claim}"),
                         )));
                     }
                 }
@@ -105,8 +106,7 @@ where
             for c in crit {
                 if !self.known_crit.contains(&c.to_string()) {
                     return Err(JwtError::Jws(JwsError::InvalidHeader(format!(
-                        "unknown crit: {}",
-                        c
+                        "unknown crit: {c}"
                     ))));
                 }
             }
@@ -134,20 +134,20 @@ where
                 ClaimValidator::Presence(c) => {
                     if val.get(c).is_none() {
                         return Err(JwtError::Payload(PayloadError::MissingRequiredProperty(
-                            format!("missing required claim: {}", c),
+                            format!("missing required claim: {c}"),
                         )));
                     }
                 }
                 ClaimValidator::Value(claim, value) => {
                     let Some(val) = val.get(claim) else {
                         return Err(JwtError::Payload(PayloadError::MissingRequiredProperty(
-                            format!("missing required claim: {}", claim),
+                            format!("missing required claim: {claim}"),
                         )));
                     };
                     let value: serde_json::Value = (value.to_owned()).into();
                     if val != &value {
                         return Err(JwtError::Payload(PayloadError::MissingRequiredProperty(
-                            format!("invalid value for claim: {}", claim),
+                            format!("invalid value for claim: {claim}"),
                         )));
                     }
                 }

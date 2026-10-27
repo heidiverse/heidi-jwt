@@ -102,36 +102,42 @@ impl std::hash::Hash for Value {
     }
 }
 impl Value {
+    #[must_use]
     pub fn get(&self, key: &str) -> Option<&Value> {
         match self {
             Value::Object(map) => map.get(key),
             _ => None,
         }
     }
+    #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Value::String(s) => Some(s),
             _ => None,
         }
     }
+    #[must_use]
     pub fn as_u64(&self) -> Option<u64> {
         match self {
-            Value::Integer(i) => Some(*i as u64),
+            Value::Integer(i) => (*i).try_into().ok(),
             _ => None,
         }
     }
+    #[must_use]
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             Value::Integer(i) => Some(*i),
             _ => None,
         }
     }
+    #[must_use]
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Boolean(b) => Some(*b),
             _ => None,
         }
     }
+    #[must_use]
     pub fn as_float(&self) -> Option<f64> {
         match self {
             Value::Float(f) => Some(f.into()),
@@ -144,12 +150,14 @@ impl Value {
             _ => None,
         }
     }
+    #[must_use]
     pub fn as_array(&self) -> Option<&Vec<Value>> {
         match self {
             Value::Array(a) => Some(a),
             _ => None,
         }
     }
+    #[must_use]
     pub fn into_typed_array<T: Serialize + DeserializeOwned>(&self) -> Option<Vec<T>> {
         match self {
             Value::Array(a) => {
@@ -172,6 +180,7 @@ impl Value {
             _ => None,
         }
     }
+    #[must_use]
     pub fn as_object(&self) -> Option<&HashMap<String, Value>> {
         match self {
             Value::Object(o) => Some(o),
@@ -201,10 +210,12 @@ impl From<&Value> for serde_json::Value {
                 serde_json::Value::Number(serde_json::Number::from_f64(f.into()).unwrap())
             }
             Value::String(s) => serde_json::Value::String(s.clone()),
-            Value::Array(a) => serde_json::Value::Array(a.iter().map(|v| v.into()).collect()),
-            Value::Object(o) => serde_json::Value::Object(
-                o.iter().map(|(k, v)| (k.clone(), v.into())).collect(),
-            ),
+            Value::Array(a) => {
+                serde_json::Value::Array(a.iter().map(std::convert::Into::into).collect())
+            }
+            Value::Object(o) => {
+                serde_json::Value::Object(o.iter().map(|(k, v)| (k.clone(), v.into())).collect())
+            }
         }
     }
 }
@@ -252,9 +263,12 @@ impl From<serde_json::Value> for Value {
                 }
             }
             josekit::Value::String(s) => Value::String(s),
-            josekit::Value::Array(values) => {
-                Value::Array(values.into_iter().map(|a| a.into()).collect::<Vec<_>>())
-            }
+            josekit::Value::Array(values) => Value::Array(
+                values
+                    .into_iter()
+                    .map(std::convert::Into::into)
+                    .collect::<Vec<_>>(),
+            ),
             josekit::Value::Object(map) => {
                 Value::Object(map.into_iter().map(|(k, v)| (k, v.into())).collect())
             }
